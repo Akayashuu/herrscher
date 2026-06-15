@@ -1,0 +1,6 @@
+/dctl
+/dctl.exe
+*.test
+
+# per-session git worktrees created by `dctl serve`
+/.dctl-sessions/

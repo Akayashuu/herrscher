@@ -1,0 +1,29 @@
+# systemd --user unit: bind a persistent Claude session to a Discord channel.
+#
+# Install:
+#   mkdir -p ~/.config/systemd/user
+#   cp contrib/dctl-bridge.service ~/.config/systemd/user/
+#   # edit the placeholders below (token, channel, paths), then:
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now dctl-bridge
+#   loginctl enable-linger "$USER"   # keep it running after logout / across reboots
+#   journalctl --user -u dctl-bridge -f   # watch the logs
+#
+[Unit]
+Description=dctl bridge — Discord channel <-> persistent Claude session
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# The project Claude should operate in (so --continue resumes that project's session).
+WorkingDirectory=%h/dev/prospector-ci
+Environment=DISCORD_BOT_TOKEN=REPLACE_WITH_TOKEN
+Environment=DISCORD_CHANNEL_ID=1515416966079320175
+# %h = home. Adjust the dctl path if installed elsewhere (e.g. ~/.local/bin/dctl).
+ExecStart=%h/.local/bin/dctl bridge --cmd "claude -p --continue" -v --state %h/.local/state/dctl/bridge.last
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
