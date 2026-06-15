@@ -1,11 +1,11 @@
-package kernel
+package contracts
 
 import (
 	"context"
 	"testing"
 )
 
-// recGateway records calls; used across kernel tests.
+// recGateway records calls; used across contracts tests.
 type recGateway struct {
 	manifest Manifest
 	posts    []string

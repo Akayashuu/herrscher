@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/Akayashuu/herrscher/contracts"
 	"github.com/Akayashuu/herrscher/internal/state"
-	"github.com/Akayashuu/herrscher/kernel"
 )
 
 // recGW records outbound port actions for assertions.
@@ -18,33 +18,33 @@ type recGW struct {
 	reacts  []string
 }
 
-func (g *recGW) Manifest() kernel.Manifest {
-	return kernel.Manifest{Capabilities: kernel.Capabilities{Reactions: true, SelectMenus: true, Replies: true}}
+func (g *recGW) Manifest() contracts.Manifest {
+	return contracts.Manifest{Capabilities: contracts.Capabilities{Reactions: true, SelectMenus: true, Replies: true}}
 }
 
-func (g *recGW) Post(_ context.Context, _ kernel.Conversation, text string) (kernel.MessageID, error) {
+func (g *recGW) Post(_ context.Context, _ contracts.Conversation, text string) (contracts.MessageID, error) {
 	g.posts = append(g.posts, text)
 	return "", nil
 }
 
-func (g *recGW) Reply(_ context.Context, _ kernel.Conversation, _ kernel.MessageID, text string) (kernel.MessageID, error) {
+func (g *recGW) Reply(_ context.Context, _ contracts.Conversation, _ contracts.MessageID, text string) (contracts.MessageID, error) {
 	g.replies = append(g.replies, text)
 	return "", nil
 }
 
-func (g *recGW) React(_ context.Context, _ kernel.Conversation, _ kernel.MessageID, emoji string) error {
+func (g *recGW) React(_ context.Context, _ contracts.Conversation, _ contracts.MessageID, emoji string) error {
 	g.reacts = append(g.reacts, emoji)
 	return nil
 }
 
-func (g *recGW) Menu(_ context.Context, _ kernel.Conversation, _ kernel.MessageID, prompt string, _ []kernel.Choice) error {
+func (g *recGW) Menu(_ context.Context, _ contracts.Conversation, _ contracts.MessageID, prompt string, _ []contracts.Choice) error {
 	g.menus = append(g.menus, prompt)
 	return nil
 }
 
 func TestPostResultEmitsViaGateway(t *testing.T) {
 	rec := &recGW{}
-	conv := kernel.Conversation{Gateway: "discord", ID: "chan"}
+	conv := contracts.Conversation{Gateway: "discord", ID: "chan"}
 	postResultGW(context.Background(), rec, conv, "mid", "hello world", nil, Options{})
 	if len(rec.replies) != 1 || rec.replies[0] != "hello world" {
 		t.Fatalf("postResult should reply via the gateway: %+v", rec)

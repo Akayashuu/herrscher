@@ -1,4 +1,4 @@
-package kernel
+package contracts
 
 // Conversation is an opaque address into a chat platform. Comparable so it can
 // key a map (Conversation -> SessionID).

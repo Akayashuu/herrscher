@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/Akayashuu/dctl"
 	"github.com/Akayashuu/herrscher/internal/health"
+	"github.com/coder/websocket"
 )
 
 const gatewayURL = "wss://gateway.discord.gg/?v=10&encoding=json"

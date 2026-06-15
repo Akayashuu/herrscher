@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/Akayashuu/dctl"
-	"github.com/Akayashuu/herrscher/kernel"
+	"github.com/Akayashuu/herrscher/contracts"
 )
 
 type fakeClient struct {
@@ -32,12 +32,12 @@ func (f *fakeClient) SendSelectMenu(_ context.Context, _, _, content, _ string, 
 	return &dctl.Message{ID: "m3"}, nil
 }
 
-var _ kernel.Gateway = (*Gateway)(nil)
+var _ contracts.Gateway = (*Gateway)(nil)
 
 func TestGatewayManifest(t *testing.T) {
 	g := NewGateway(&fakeClient{})
 	m := g.Manifest()
-	if m.Kind != "discord" || m.Category != kernel.CategoryGateway {
+	if m.Kind != "discord" || m.Category != contracts.CategoryGateway {
 		t.Fatalf("bad manifest %+v", m)
 	}
 	if !m.Capabilities.Reactions || !m.Capabilities.SelectMenus || !m.Capabilities.Replies {
@@ -49,12 +49,12 @@ func TestGatewayTranslatesActions(t *testing.T) {
 	fc := &fakeClient{}
 	g := NewGateway(fc)
 	ctx := context.Background()
-	conv := kernel.Conversation{Gateway: "discord", ID: "chan"}
+	conv := contracts.Conversation{Gateway: "discord", ID: "chan"}
 
 	_, _ = g.Post(ctx, conv, "hello")
 	_, _ = g.Reply(ctx, conv, "mid", "answer")
 	_ = g.React(ctx, conv, "mid", "👀")
-	_ = g.Menu(ctx, conv, "mid", "pick", []kernel.Choice{{Label: "A", Value: "a"}})
+	_ = g.Menu(ctx, conv, "mid", "pick", []contracts.Choice{{Label: "A", Value: "a"}})
 
 	if len(fc.sent) != 1 || len(fc.replied) != 1 || len(fc.reacted) != 1 || len(fc.menus) != 1 {
 		t.Fatalf("translation incomplete: %+v", fc)

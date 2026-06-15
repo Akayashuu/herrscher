@@ -3,11 +3,11 @@ package serve
 import (
 	"testing"
 
-	"github.com/Akayashuu/herrscher/kernel"
+	"github.com/Akayashuu/herrscher/contracts"
 )
 
 func TestBuildRegistryHasDiscordGateway(t *testing.T) {
-	var r kernel.Registry
+	var r contracts.Registry
 	registerPlugins(&r, nil) // nil client is fine: we only inspect manifests
 	gws := r.Gateways()
 	if len(gws) != 1 {

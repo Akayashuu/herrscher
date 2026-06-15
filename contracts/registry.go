@@ -1,4 +1,4 @@
-package kernel
+package contracts
 
 // Registry is held by the host. Plugins register into it; the host queries by
 // category. In Phase 1 the in-process registration becomes NATS

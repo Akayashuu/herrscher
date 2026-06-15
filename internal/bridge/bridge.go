@@ -14,11 +14,11 @@ import (
 	"time"
 
 	"github.com/Akayashuu/dctl"
+	"github.com/Akayashuu/herrscher/contracts"
 	"github.com/Akayashuu/herrscher/discord"
 	"github.com/Akayashuu/herrscher/internal/control"
 	"github.com/Akayashuu/herrscher/internal/session"
 	"github.com/Akayashuu/herrscher/internal/state"
-	"github.com/Akayashuu/herrscher/kernel"
 )
 
 // discordMaxLen is Discord's hard per-message character limit.
@@ -138,11 +138,11 @@ func Run(ctx context.Context, c *dctl.Client, o Options) error {
 	}
 	logf(o.Verbose, "bridge up: cmd=%q stream=%v model=%q interval=%ds last=%s", o.Cmd, o.Stream, o.Model, o.Interval, last)
 
-	// Outbound emission routes through the kernel.Gateway port (the Discord
+	// Outbound emission routes through the contracts.Gateway port (the Discord
 	// adapter wrapped in Degrade), proving the port end-to-end. gw/conv are stable
 	// for the whole run: ch is fixed and gw does not depend on it.
-	gw := kernel.Degrade(discord.NewGateway(c))
-	conv := kernel.Conversation{Gateway: "discord", ID: ch}
+	gw := contracts.Degrade(discord.NewGateway(c))
+	conv := contracts.Conversation{Gateway: "discord", ID: ch}
 
 	oneShot := func(ctx context.Context, mm session.DctlMessage) (string, error) {
 		return runCmd(ctx, o.Cmd, mm)
@@ -214,7 +214,7 @@ func Run(ctx context.Context, c *dctl.Client, o Options) error {
 			// Acknowledge immediately so the human sees the message was picked
 			// up while the (slow) command runs. Best-effort: ignore if the bot
 			// lacks Add Reactions.
-			_ = gw.React(ctx, conv, kernel.MessageID(m.ID), ackEmoji)
+			_ = gw.React(ctx, conv, contracts.MessageID(m.ID), ackEmoji)
 
 			var pv *progressView
 			var onEvent func(session.Event)
@@ -245,7 +245,7 @@ func Run(ctx context.Context, c *dctl.Client, o Options) error {
 					pv.finish(true)
 				}
 				_ = c.Unreact(ctx, ch, m.ID, ackEmoji)
-				_ = gw.React(ctx, conv, kernel.MessageID(m.ID), failEmoji)
+				_ = gw.React(ctx, conv, contracts.MessageID(m.ID), failEmoji)
 				continue
 			}
 			postResult(ctx, c, gw, conv, m.ID, out, resp, o)
@@ -254,7 +254,7 @@ func Run(ctx context.Context, c *dctl.Client, o Options) error {
 			}
 			// Swap the "seen" mark for a "done" mark once the answer is posted.
 			_ = c.Unreact(ctx, ch, m.ID, ackEmoji)
-			_ = gw.React(ctx, conv, kernel.MessageID(m.ID), doneEmoji)
+			_ = gw.React(ctx, conv, contracts.MessageID(m.ID), doneEmoji)
 		}
 		time.Sleep(time.Duration(o.Interval) * time.Second)
 	}
@@ -266,7 +266,7 @@ func Run(ctx context.Context, c *dctl.Client, o Options) error {
 // ControlSocket; otherwise it chunks the text and replies (or sends, when there
 // is no human message to thread under — e.g. output from an injected pick). A
 // failed menu post degrades to the plain-text path so a turn is never dropped.
-func postResult(ctx context.Context, c *dctl.Client, gw kernel.Gateway, conv kernel.Conversation, replyTo, out string, resp session.Responder, o Options) {
+func postResult(ctx context.Context, c *dctl.Client, gw contracts.Gateway, conv contracts.Conversation, replyTo, out string, resp session.Responder, o Options) {
 	// Choice-menu emission stays a DIRECT client call: its custom_id must carry
 	// the SESSION name (not the channel) so the daemon routes a click back to
 	// this session's control socket. Routing it through gw.Menu would key the
@@ -289,15 +289,15 @@ func postResult(ctx context.Context, c *dctl.Client, gw kernel.Gateway, conv ker
 	postResultGW(ctx, gw, conv, replyTo, out, resp, o)
 }
 
-// postResultGW emits the plain-text branch through the kernel.Gateway port
+// postResultGW emits the plain-text branch through the contracts.Gateway port
 // (degraded discord adapter): a reply when threading under a human message, or a
 // post otherwise. The choice-menu branch is the caller's concern and is NOT
 // handled here. resp and o are kept for symmetry with postResult.
-func postResultGW(ctx context.Context, gw kernel.Gateway, conv kernel.Conversation, replyTo, out string, resp session.Responder, o Options) {
+func postResultGW(ctx context.Context, gw contracts.Gateway, conv contracts.Conversation, replyTo, out string, resp session.Responder, o Options) {
 	for _, part := range chunk(out, discordMaxLen) {
 		var err error
 		if replyTo != "" {
-			_, err = gw.Reply(ctx, conv, kernel.MessageID(replyTo), part)
+			_, err = gw.Reply(ctx, conv, contracts.MessageID(replyTo), part)
 		} else {
 			_, err = gw.Post(ctx, conv, part)
 		}

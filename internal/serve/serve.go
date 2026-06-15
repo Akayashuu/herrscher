@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Akayashuu/dctl"
+	"github.com/Akayashuu/herrscher/contracts"
 	"github.com/Akayashuu/herrscher/discord"
 	"github.com/Akayashuu/herrscher/internal/control"
 	"github.com/Akayashuu/herrscher/internal/forge"
@@ -19,7 +20,6 @@ import (
 	"github.com/Akayashuu/herrscher/internal/state"
 	"github.com/Akayashuu/herrscher/internal/supervisor"
 	"github.com/Akayashuu/herrscher/internal/worktree"
-	"github.com/Akayashuu/herrscher/kernel"
 )
 
 // serviceUpdater backs /service update|restart from inside the daemon. It binds
@@ -175,7 +175,7 @@ func handleDeferred(ctx context.Context, c *dctl.Client, hdl *handler.Handler, h
 
 // registerPlugins wires the in-process plugins into the registry. In Phase 1 this
 // is replaced by NATS self-registration with the same Manifest.
-func registerPlugins(r *kernel.Registry, c *dctl.Client) {
+func registerPlugins(r *contracts.Registry, c *dctl.Client) {
 	r.RegisterGateway(discord.NewGateway(c))
 }
 
@@ -226,7 +226,7 @@ func Run(ctx context.Context, c *dctl.Client, o Options) error {
 
 	// Plugin registry: Discord is registered as a gateway plugin rather than
 	// hard-wired. Phase 1 swaps registerPlugins for NATS self-registration.
-	var registry kernel.Registry
+	var registry contracts.Registry
 	registerPlugins(&registry, c)
 	fmt.Fprintf(os.Stderr, "dctl serve: registered %d gateway plugin(s)\n", len(registry.Gateways()))
 

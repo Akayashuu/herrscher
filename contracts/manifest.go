@@ -1,4 +1,4 @@
-package kernel
+package contracts
 
 type Category string
 
