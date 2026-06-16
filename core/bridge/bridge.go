@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Herrscherd/herrscher-contracts"
+	"github.com/Herrscherd/herrscher/core/curator"
 	"github.com/Herrscherd/herrscher/core/internal/control"
 	"github.com/Herrscherd/herrscher/core/internal/state"
 )
@@ -56,8 +57,10 @@ type Options struct {
 }
 
 // Run links the channel to the backend until ctx is cancelled. newBackend builds
-// the model edge for the resolved channel, keeping core model-agnostic.
-func Run(ctx context.Context, p contracts.ChannelReader, gw contracts.Gateway, newBackend BackendFactory, o Options) error {
+// the model edge for the resolved channel, keeping core model-agnostic. mem is
+// the optional Memory port (nil when no memory plugin is wired): when present the
+// curator recalls background to prime each turn and records the turn afterwards.
+func Run(ctx context.Context, p contracts.ChannelReader, gw contracts.Gateway, newBackend BackendFactory, mem contracts.Memory, o Options) error {
 	if !p.Enabled() {
 		return ErrDisabled
 	}
@@ -107,6 +110,10 @@ func Run(ctx context.Context, p contracts.ChannelReader, gw contracts.Gateway, n
 	// caller wraps the platform adapter in Degrade). gw/conv are stable for the
 	// whole run: ch is fixed and gw does not depend on it.
 	conv := contracts.Conversation{Gateway: "discord", ID: ch}
+
+	// cur is nil (a no-op) unless a Memory plugin and a session name are both
+	// present, so the turn loop below can call it unconditionally.
+	cur := curator.New(mem, o.Session)
 
 	resp, err := newBackend(ch)
 	if err != nil {
@@ -185,13 +192,15 @@ func Run(ctx context.Context, p contracts.ChannelReader, gw contracts.Gateway, n
 				onEvent = pv.add
 			}
 
-			out, err := resp.Respond(ctx, contracts.Prompt{
+			prompt := contracts.Prompt{
 				Content:     m.Content,
+				Context:     cur.Context(ctx),
 				Author:      m.AuthorName,
 				MessageID:   m.ID,
 				ChannelID:   m.ChannelID,
 				Attachments: atts,
-			}, onEvent)
+			}
+			out, err := resp.Respond(ctx, prompt, onEvent)
 			// The backend has read the files during the (now-finished) turn, so
 			// they can go. Keeping them would slowly fill the temp dir.
 			removeFiles(atts)
@@ -208,6 +217,9 @@ func Run(ctx context.Context, p contracts.ChannelReader, gw contracts.Gateway, n
 				continue
 			}
 			postResult(ctx, p, gw, conv, m.ID, out, resp, o)
+			if rerr := cur.Observe(ctx, prompt, out); rerr != nil {
+				logf(o.Verbose, "memory record error: %v", rerr) // best-effort: never break the loop
+			}
 			if pv != nil {
 				pv.finish(err != nil)
 			}
@@ -322,6 +334,6 @@ func logf(on bool, format string, a ...any) {
 		return
 	}
 	w := bufio.NewWriter(os.Stderr)
-	fmt.Fprintf(w, "dctl bridge: "+format+"\n", a...)
+	fmt.Fprintf(w, "herrscher bridge: "+format+"\n", a...)
 	w.Flush()
 }

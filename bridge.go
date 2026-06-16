@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
+	"os"
 
 	claude "github.com/Herrscherd/herrscher-claude-backend"
 	"github.com/Herrscherd/herrscher-contracts"
@@ -53,7 +55,11 @@ func runBridge(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	return bridge.Run(ctx, set.Reader, contracts.Degrade(set.Gateway), newBackend, bridge.Options{
+	mem := buildMemory(ctx)
+	if mem != nil {
+		defer mem.Close()
+	}
+	return bridge.Run(ctx, set.Reader, contracts.Degrade(set.Gateway), newBackend, mem, bridge.Options{
 		Channel:       *ch,
 		Ensure:        *ensure,
 		Interval:      *interval,
@@ -66,6 +72,30 @@ func runBridge(ctx context.Context, args []string) error {
 		ProgressKeep:  *progressKeep,
 		ControlSocket: *controlSocket,
 	})
+}
+
+// buildMemory instantiates the first registered memory plugin from the registry,
+// or returns nil when none is compiled in or its config is unset. Memory is
+// optional: a config/instantiation failure disables it (logged) rather than
+// blocking the bridge, so a vault is opt-in via its plugin's env (OBSIDIAN_VAULT).
+func buildMemory(ctx context.Context) contracts.Memory {
+	for _, p := range contracts.Default.Memories() {
+		if p.Memory == nil {
+			continue
+		}
+		cfg, err := contracts.Resolve(p.Manifest.Config, os.Getenv)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "memory %q disabled: %v\n", p.Manifest.Kind, err)
+			return nil
+		}
+		mem, err := p.Memory(ctx, cfg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "memory %q disabled: %v\n", p.Manifest.Kind, err)
+			return nil
+		}
+		return mem
+	}
+	return nil
 }
 
 // bridgeOptionsHasParticipants exists so a compile-time test can assert the

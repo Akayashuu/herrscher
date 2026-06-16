@@ -12,5 +12,6 @@ import (
 	// herrscher:plugins
 	_ "github.com/Herrscherd/herrscher-claude-backend"
 	_ "github.com/Herrscherd/herrscher-discord-gateway"
+	_ "github.com/Herrscherd/herrscher-obsidian-memory"
 	// herrscher:end
 )

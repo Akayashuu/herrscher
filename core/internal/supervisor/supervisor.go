@@ -11,16 +11,16 @@ import (
 	"github.com/Herrscherd/herrscher/core/internal/state"
 )
 
-// Supervisor manages one child `dctl bridge` process per session.
+// Supervisor manages one child `herrscher bridge` process per session.
 type Supervisor struct {
 	ctx       context.Context
-	selfBin   string // path to the dctl binary (os.Executable)
+	selfBin   string // path to the herrscher binary (os.Executable)
 	PartDir   string // participants journal dir; empty disables --participants
 	mu        sync.Mutex
 	cancels   map[string]context.CancelFunc
 }
 
-// bridgeArgs builds the child `dctl bridge` argv for sess.
+// bridgeArgs builds the child `herrscher bridge` argv for sess.
 func (s *Supervisor) bridgeArgs(sess state.Session) []string {
 	args := []string{"bridge", "-c", sess.ChannelID, "--cmd", sess.Cmd, "--session", sess.Name}
 	if sess.Backend != "" && sess.Backend != "stream" {

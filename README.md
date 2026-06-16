@@ -159,8 +159,8 @@ import the ports without pulling in the host.
 The **edges** are interchangeable plugins, each its own repo, **not** part of the
 binary's module — they are the official Gateway and Backend listed in the table above.
 [`dctl`] is not a family member either: it is an external dependency, the
-low-level Discord REST/WebSocket client the gateway consumes (currently being
-rewritten from scratch).
+pure, dependency-free Discord REST client (v10) the gateway consumes — no
+gateway socket, no CLI, just on-demand HTTP.
 
 [`dctl`]: https://github.com/Herrscherd/dctl
 
@@ -431,7 +431,7 @@ herrscher-dev/
 ├── herrscher-contracts/       ← the ports (separate module)
 ├── herrscher-discord-gateway/ ← Gateway plugin (separate module)
 ├── herrscher-claude-backend/  ← Backend plugin (separate module)
-└── dctl/                      ← external dependency (Discord client, being rewritten)
+└── dctl/                      ← external dependency (pure Discord REST client)
 ```
 
 The `replace` directives resolve only when the siblings are checked out alongside
