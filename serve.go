@@ -118,29 +118,16 @@ func runSession(ctx context.Context, args []string) error {
 	return nil
 }
 
-// buildGateway instantiates the first registered gateway plugin's GatewaySet
-// from cfg. It iterates contracts.Default.Gateways() so the daemon is driven by
-// the registry, not by hand-wired plugin types: a blank import in plugins.go is
-// all it takes for a new gateway to be picked up here.
+// buildGateway returns the first registered gateway's GatewaySet, built through
+// the multi-gateway hub. Behavior is unchanged from the pre-hub version (first
+// gateway wins); the hub additionally tolerates other gateways whose config is
+// absent. A new gateway is still just a blank import + rebuild.
 func buildGateway(ctx context.Context) (host.Deps, error) {
-	for _, p := range contracts.Default.Gateways() {
-		if p.Gateway == nil {
-			continue
-		}
-		// The plugin declares its config surface in its Manifest; the host resolves
-		// it generically from the environment and rejects a missing required value.
-		// This is why the host needs no Discord-specific key knowledge here.
-		cfg, err := contracts.Resolve(p.Manifest.Config, os.Getenv)
-		if err != nil {
-			return host.Deps{}, fmt.Errorf("gateway %q: %w", p.Manifest.Kind, err)
-		}
-		set, err := p.Gateway(ctx, cfg)
-		if err != nil {
-			return host.Deps{}, fmt.Errorf("gateway %q: %w", p.Manifest.Kind, err)
-		}
-		return set, nil
+	hub, err := host.BuildHub(ctx, contracts.Default.Gateways(), os.Getenv)
+	if err != nil {
+		return host.Deps{}, err
 	}
-	return host.Deps{}, fmt.Errorf("no gateway plugin registered")
+	return hub.First(), nil
 }
 
 // scanFlag returns the value of --name / -name (space- or =-separated) from a
