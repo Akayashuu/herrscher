@@ -66,6 +66,8 @@ func (h *Handler) sessionCreateRun(ctx context.Context, in contracts.Input) (str
 	if backend == "" {
 		backend = "stream" // default backend: persistent claude stream-json
 	}
+	gwList, _ := in.Lookup("gateways")
+	gateways := ParseGateways(gwList, in.Bool("terminal-only"))
 	ws := h.st.WorkspaceRoot()
 	project := ""
 	if ws != "" {
@@ -111,7 +113,7 @@ func (h *Handler) sessionCreateRun(ctx context.Context, in contracts.Input) (str
 			}
 			return "", fmt.Errorf("create channel: %v", err)
 		}
-		sess = state.Session{Name: name, ChannelID: chID, Type: "text", Cmd: cmd, Backend: backend, Worktree: worktree, Project: project}
+		sess = state.Session{Name: name, ChannelID: chID, Type: "text", Cmd: cmd, Backend: backend, Worktree: worktree, Project: project, Gateways: gateways}
 	case "forum":
 		chID, err := h.d.ForumPost(ctx, home.ID, title, "Session **"+title+"** started.")
 		if err != nil {
@@ -120,7 +122,7 @@ func (h *Handler) sessionCreateRun(ctx context.Context, in contracts.Input) (str
 			}
 			return "", fmt.Errorf("create forum post: %v", err)
 		}
-		sess = state.Session{Name: name, ChannelID: chID, Type: "forum", Cmd: cmd, Backend: backend, Worktree: worktree, Project: project}
+		sess = state.Session{Name: name, ChannelID: chID, Type: "forum", Cmd: cmd, Backend: backend, Worktree: worktree, Project: project, Gateways: gateways}
 	default:
 		return "", fmt.Errorf("home type %q unsupported", home.Type)
 	}
