@@ -104,6 +104,22 @@ func InitCmd(args []string) int {
 		fmt.Println("wrote plugins.go (--no-build); run `go mod tidy && go build` in the host to apply")
 		return 0
 	}
+
+	// If go get/tidy/build fails (e.g. an unresolvable module), restore the
+	// original plugins.go so a botched init doesn't leave the host uncompilable.
+	if code := buildStack(dir, modules); code != 0 {
+		if werr := os.WriteFile(manifest, src, 0o644); werr != nil {
+			fmt.Fprintf(os.Stderr, "restore %s: %v\n", manifest, werr)
+		} else {
+			fmt.Fprintf(os.Stderr, "build failed; restored %s\n", manifest)
+		}
+		return code
+	}
+	return 0
+}
+
+// buildStack go-gets each module then tidies and rebuilds the host.
+func buildStack(dir string, modules []string) int {
 	for _, m := range modules {
 		if code := run(dir, "go", "get", "--", m); code != 0 {
 			return code
