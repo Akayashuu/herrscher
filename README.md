@@ -35,8 +35,8 @@ xcaddy pattern). These are the official ones:
 
 | Repo | Edge | Role |
 |------|------|------|
-| [herrscher-discord-gateway](https://github.com/Akayashuu/herrscher-discord-gateway) | channel | Adapts Discord to the `Gateway` port (via `dctl`). |
-| [herrscher-claude-backend](https://github.com/Akayashuu/herrscher-claude-backend) | model | Speaks Claude stream-json behind the `Backend` port. |
+| [herrscher-discord-gateway](https://github.com/Herrscherd/herrscher-discord-gateway) | channel | Adapts Discord to the `Gateway` port (via `dctl`). |
+| [herrscher-claude-backend](https://github.com/Herrscherd/herrscher-claude-backend) | model | Speaks Claude stream-json behind the `Backend` port. |
 
 `dctl` is **not** part of the family either: it is an external dependency — the
 low-level Discord REST/WebSocket client that the gateway consumes.
