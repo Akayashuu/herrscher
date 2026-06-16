@@ -14,6 +14,8 @@ func (h *Handler) Commands() []contracts.Cmd {
 			Param("clone", "remote repo (owner/name) to clone into the workspace first", false).
 			Param("cmd", "bridged command (defaults to the configured cmd)", false).
 			Param("backend", "bridge backend: stream (default) | oneshot", false).
+			Param("gateways", "comma-separated gateway kinds to bind (e.g. discord,terminal)", false).
+			Param("terminal_only", "bind the session to the terminal gateway only", false).
 			Param("shared", "run in the main checkout instead of an isolated worktree", false).
 			Do(h.sessionCreateRun),
 		contracts.New("session", "close").

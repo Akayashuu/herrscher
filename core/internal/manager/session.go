@@ -67,7 +67,7 @@ func (h *Handler) sessionCreateRun(ctx context.Context, in contracts.Input) (str
 		backend = "stream" // default backend: persistent claude stream-json
 	}
 	gwList, _ := in.Lookup("gateways")
-	gateways := ParseGateways(gwList, in.Bool("terminal-only"))
+	gateways := ParseGateways(gwList, in.Bool("terminal_only"))
 	ws := h.st.WorkspaceRoot()
 	project := ""
 	if ws != "" {
