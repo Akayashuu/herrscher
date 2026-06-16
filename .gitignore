@@ -4,3 +4,6 @@
 
 # per-session git worktrees created by `dctl serve`
 /.dctl-sessions/
+
+# local secrets, auto-loaded at startup (see .env.example)
+/.env

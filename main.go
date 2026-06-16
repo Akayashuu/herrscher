@@ -26,6 +26,21 @@ func main() {
 		usage()
 		os.Exit(2)
 	}
+
+	// Auto-load a project-root .env so every command (and every plugin's config
+	// resolution) sees its vars without an explicit --env-file. Real environment
+	// wins over the file, and the daemon propagates os.Environ() to each bridge
+	// subprocess, so one .env floods gateway/backend/memory alike. $HERRSCHER_ENV_FILE
+	// overrides the path; a missing file is not an error.
+	envPath := ".env"
+	if p := os.Getenv("HERRSCHER_ENV_FILE"); p != "" {
+		envPath = p
+	}
+	if err := loadEnvFile(envPath); err != nil {
+		fmt.Fprintln(os.Stderr, "herrscher: "+err.Error())
+		os.Exit(1)
+	}
+
 	cmd := os.Args[1]
 	args := os.Args[2:]
 
