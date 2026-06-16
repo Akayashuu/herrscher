@@ -1,39 +1,43 @@
-# Herrscher — Unified Binary + Plugin-Registered CLI — Design
+# Herrscher — Unified Binary Consolidation — Design
 
-**Status:** design locked (2026-06-16). Implementation plan to follow via writing-plans.
+**Status:** design locked (2026-06-16). Scope trimmed to structural consolidation;
+the command-API redesign is deferred behind the Memory module (see §5).
 
-**Goal:** Collapse the Herrscher tooling into a single `herrscher` binary whose CLI
-surface is *contributed by plugins* — not hardcoded. Kill the legacy dctl monolith
-CLI that currently lives inside `herrscherd`. Plugins register their own
-subcommands through `contracts`, exactly as they already register gateway/backend
-factories.
+**Goal:** Collapse the Herrscher tooling into a single `herrscher` binary by folding
+`herrscherd` (host), `herrscher-cli` (management), and `herrscher-core` (engine
+packages) into the umbrella repo. No behaviour changes, no `contracts` changes, no
+Discord changes — purely "three repos become one binary."
 
-**Architecture (one line):** the umbrella repo stops being a passive docs/symlink
-skeleton and becomes the composition-root that *is* the binary — it requires
-contracts + core + the plugins and builds `herrscher`.
+**Architecture (one line):** the umbrella repo `herrscher` stops being a passive
+docs/symlink skeleton and becomes the composition-root that *is* the binary — it
+requires `contracts` + the plugins + `dctl` and builds `herrscher`.
 
 ---
 
-## 1. Motivation — the "soucis"
+## 1. Motivation
 
-- `herrscherd` today ships the **old dctl monolith CLI verbatim** (`send`, `reply`,
-  `read`, `watch`, `react`, `thread`, `channel`), instantiating `dctl.New()`
-  directly in `main()`. Its help even still prints `dctl — minimal Discord bot CLI`.
-  These Discord-specific verbs do not belong baked into the host.
-- Plugin selection is hardcoded: `buildGateway` returns the **first** registered
-  gateway. With two gateways (discord + slack) or two backends (claude + gpt) you
-  are stuck.
-- Management (`herrscher-cli`) and execution (`herrscherd`) are two separate
-  binaries/repos for what, in solo use, is one tool.
+- Today the platform ships as **three buildable modules** for what, in solo use, is
+  one tool: `herrscherd` (the daemon + the legacy dctl CLI verbs), `herrscher-cli`
+  (the `plugin`/`update`/`install` management facade), and `herrscher-core` (the
+  bridge/host/service/manager packages). Two separate `main()` binaries
+  (`herrscherd` and `herrscher-cli`) is friction with no benefit at this stage.
+- The umbrella repo `herrscher` currently holds only docs and (broken) symlinks. It
+  should be the real composition-root you install:
+  `go install github.com/Herrscherd/herrscher@latest`.
+
+Known issues deliberately **left untouched** this round (they belong to the
+deferred command-API work in §5): the `herrscherd` help still prints
+`dctl — minimal Discord bot CLI`; `buildGateway` hardcodes "first registered
+gateway wins"; the legacy dctl verbs live in the host instead of the plugin.
 
 ## 2. Module topology (LOCKED)
 
 | Module (repo) | Role |
 |---|---|
-| `herrscher` (umbrella → binary) | composition-root: `main` + `plugins.go` + CLI dispatcher + management cmds + `core/` packages + wiring. `go build` → binary `herrscher`. Keeps the README/diagrams. |
-| `herrscher-contracts` | authority/regulator — every dependency arrow points here. Extended with CLI-command declaration. |
-| `herrscher-discord-gateway` | gateway plugin — gains its CLI subcommands (`send`/`read`/`react`/`thread`/`channel`/`watch`). |
-| `herrscher-claude-backend` | backend plugin — unchanged (may expose commands later). |
+| `herrscher` (umbrella → binary) | composition-root: `main` + `plugins.go` + daemon wiring (`serve`/`bridge`/`service`) + the legacy CLI verbs (unchanged) + `manage/` (was herrscher-cli) + `core/` packages (was herrscher-core). `go build` → binary `herrscher`. |
+| `herrscher-contracts` | authority/regulator — **unchanged this round.** |
+| `herrscher-discord-gateway` | gateway plugin — **unchanged this round.** |
+| `herrscher-claude-backend` | backend plugin — **unchanged this round.** |
 | `dctl` | pure Discord REST library — unchanged. |
 | ~~`herrscherd`~~ | absorbed into `herrscher` → **repo deleted**. |
 | ~~`herrscher-cli`~~ | absorbed into `herrscher` → **repo deleted**. |
@@ -44,127 +48,89 @@ substitution or multi-consumer reuse. `core` has neither today — its sole cons
 is the composition-root; plugins never import it (arrows go to `contracts`). Its
 agnosticism is guaranteed by a **`purity_test`** forbidding concrete imports
 (`dctl`, any plugin) in `core/...`, *not* by a module split. Extraction back into a
-module is trivial later because the purity guard keeps it clean.
+module later stays trivial because the purity guard keeps it clean.
 
-**Why contracts never folds in:** it is the authority every plugin imports. If it
-became a subpackage of the binary, plugins would `import .../herrscher/contracts` —
-inverting the dependency graph (plugin → host). Hard no.
-
-**Install story:**
-
-```sh
-go install github.com/Herrscherd/herrscher@latest   # pulls all deps, builds `herrscher`
-```
+**Why contracts never folds in:** it is the authority every plugin imports. As a
+subpackage of the binary, plugins would `import .../herrscher/contracts` —
+inverting the dependency graph (plugin → host). Hard no. It also stays a standalone
+module so third-party plugins import it without pulling the host.
 
 ## 3. Single-binary `herrscher` structure
 
 ```
 herrscher/
-├── main.go            command dispatch (built-ins + plugin subcommand tree)
+├── main.go            command dispatch: built-ins + manage cmds + legacy verbs
 ├── plugins.go         managed blank-import manifest (herrscher:plugins markers)
-├── cli/               dispatcher: tree build, namespacing, promotion, conflicts
-├── manage/            plugin add/remove, update, install (was herrscher-cli)
-├── serve.go bridge.go service.go   daemon wiring (was herrscherd, dctl verbs removed)
-├── core/              folded herrscher-core: core/host, core/bridge, core/config
-│   └── purity_test.go forbids concrete imports in core/...
-└── docs/              umbrella README + diagrams + this spec
+├── serve.go bridge.go service.go channel.go envfile.go   daemon + legacy verbs (from herrscherd)
+├── manage/            plugin add/remove, update, install (from herrscher-cli)
+├── core/              folded herrscher-core
+│   ├── bridge/ config/ host/ service/
+│   ├── internal/      control, forge, health, instanceid, manager, state, supervisor, worktree
+│   └── purity_test.go forbids concrete imports (dctl, plugins) in core/...
+└── docs/              umbrella README + diagrams + specs
 ```
 
-**Host built-in commands (reserved names):** `serve`, `bridge`, `service`,
-`plugin`, `update`, `install`, `plugins` (diagnostics), `help`. No business verbs.
+Import paths rewrite `github.com/Herrscherd/herrscher-core/...` →
+`github.com/Herrscherd/herrscher/core/...`. The two former `main()` entry points
+(`herrscherd/main.go` verbs + daemon, `herrscher-cli/main.go` management) merge
+into one `herrscher` dispatcher: the legacy daemon/verbs keep their current command
+names; the management verbs mount as `plugin`/`update`/`install`.
 
-## 4. contracts extension — CLI command declaration
+**Command surface after consolidation (unchanged behaviour):** `send`, `reply`,
+`read`, `watch`, `react`, `thread`, `channel`, `bridge`, `serve`, `service`
+(from the old host) plus `plugin`, `update`, `install` (from herrscher-cli).
 
-`contracts` gains a command-tree type and a per-plugin CLI factory, mirroring the
-existing `GatewayFactory`/`BackendFactory` shape.
+## 4. Migration
 
-```go
-// Command is a declarative CLI node. Leaves carry Run; branches carry Sub.
-type Command struct {
-    Name    string   // verb segment, e.g. "send" or "channel"
-    Summary string   // one-line help
-    Usage   string   // optional usage line
-    Promote bool     // request top-level promotion (opt-in, see §5)
-    Run     func(ctx context.Context, args []string) error // leaf handler
-    Sub     []Command                                       // nested subcommands
-}
+- New `herrscher/go.mod` module `github.com/Herrscherd/herrscher`, go 1.23, with
+  `require`+local `replace` for `dctl`, `herrscher-contracts`,
+  `herrscher-discord-gateway`, `herrscher-claude-backend`.
+- Move `herrscher-core/*` under `herrscher/core/*`; rewrite every internal import
+  path; add `core/purity_test.go`.
+- Move `herrscherd/{main,serve,bridge,service,channel,envfile,plugins}.go` (and
+  their tests) into `herrscher/` root `package main`; repoint core imports to
+  `herrscher/core/...`.
+- Move `herrscher-cli/{lifecycle,manifest}.go` (and tests) into `herrscher/manage`
+  as `package manage`; fold its `main()` dispatch (`plugin`/`update`/`install`)
+  into `herrscher/main.go`. `install` now builds and installs the `herrscher`
+  binary; `resolveHost` defaults to the current module (self-host).
+- Delete the umbrella's broken `@herrscher/` symlink scheme.
+- `go build ./...` green and the full existing test suite (296 tests) green at the
+  end of each task.
+- **Repo deletion** (`herrscherd`, `herrscher-cli`, `herrscher-core`, local + on
+  GitHub) is destructive and public — performed only as the final step, with the
+  user's explicit go-ahead already given for this run.
 
-// CLIFactory builds a plugin's command tree from its runtime config. Called once
-// at startup to assemble the dispatch table. Building the client is zero-cost
-// (e.g. dctl.New stores a token; no network until a command runs).
-type CLIFactory func(ctx context.Context, cfg PluginConfig) ([]Command, error)
+## 5. Deferred — the command-API redesign (gated on the Memory module)
 
-type Plugin struct {
-    Manifest Manifest
-    Gateway  GatewayFactory
-    Backend  BackendFactory
-    CLI      CLIFactory   // NEW — optional
-}
-```
+Recorded as the agreed direction; **NOT implemented now.** It only pays off once the
+Memory module exists, and most command features turn out to be bridge-specific, so
+locking their shape now would be premature.
 
-The discord plugin's `CLIFactory` builds its `dctl.Client` from `cfg` once and each
-`Command.Run` closes over it. The Discord verbs move out of the host entirely and
-become this tree (e.g. `send`, `read`, `react`, `thread`, and `channel` with
-`list/create/post/delete/ensure` children).
+- **Core shrinks to session-domain methods.** `core` exposes a method API for its
+  own domain (sessions: list/start/stop/bridge/status) and nothing about users,
+  channels, "who sent a message", or homes.
+- **Commands move to the bridges.** `allow`, `home`, and similar are bridge
+  concerns (only the bridge knows its users and topology). Each bridge owns its
+  command handlers, which call core's session methods.
+- **The neutral slash abstraction leaves `contracts`.** `Command`, `CommandData`,
+  `Responder`, `InboundCommand`, `ChannelSource`, `CommandRegistrar`, the `Kind*` —
+  these model a *bridge-specific* feature (Discord/Telegram have slash commands;
+  Instagram DMs do not). They are not universal, so they belong inside the bridge
+  plugin, not in `contracts`/core.
+- **One command API.** A command is one declaration {name, params, handler}; "slash
+  command" is just one *endpoint* a bridge listens on (CLI is another). Plugins add
+  commands to this single API.
+- **Engine invariant (recorded).** A future orchestration engine consumes only the
+  universal plugin ports; engine-specific needs go through optional `Capabilities`
+  + `Degrade`, never a new mandatory plugin method.
+- **Orchestrator (recorded).** Mediator/policy-owner over the port graph that core
+  consults (selection among N plugins, composition, resilience, cross-cutting). It
+  has a **hard dependency on Memory** — the registry must verify a Memory plugin is
+  present when the Orchestrator category is active.
 
-## 5. Dispatcher — namespacing, promotion, conflict policy (LOCKED)
+## 6. Out of scope (this round)
 
-1. **Namespaced is canonical and always available.** `herrscher discord send …`
-   always works — the unambiguous fallback, whatever happens.
-2. **Promotion is opt-in.** A plugin may mark a command `Promote: true` to surface
-   it at top level (`herrscher send`). Default is not promoted.
-3. **Host built-ins are reserved.** `serve`, `bridge`, `service`, `plugin`,
-   `update`, `install`, `plugins`, `help` always win; a promotion that would shadow
-   one is refused (the verb stays reachable namespaced).
-4. **Two plugins promoting the same verb = refuse to guess.** Neither is promoted
-   (no "first in plugins.go wins" — that order is editable, hence fragile). Both
-   stay reachable namespaced. The conflict is recorded.
-5. **Conflicts are loud.** Surfaced in three places:
-   - stderr warning at startup: `⚠ verb "send" promoted by discord AND xfoo — kept
-     namespaced, use "herrscher discord send"`;
-   - `herrscher --help` shows only resolved promotions; conflicted verbs appear
-     under their namespace;
-   - `herrscher plugins` lists each plugin, its commands, and flags promotions
-     disabled by conflict.
-
-Resolution logic lives in the **host dispatcher**, not in `contracts` — contracts
-only *declares* the command structure and the promotion intent.
-
-## 6. Migration
-
-- Remove the legacy dctl CLI from the host: delete `runSend/runReply/runRead/
-  runWatch/runReact/runThread/runChannel` and the `dctl —` usage text.
-- Re-home those verbs in `herrscher-discord-gateway` as a `CLIFactory` tree.
-- Move `serve`/`bridge`/`service` wiring into `herrscher` (dctl-direct calls gone;
-  they already go through the plugin registry's `GatewaySet`).
-- Move `plugin`/`update`/`install`/`plugins` from `herrscher-cli` into
-  `herrscher/manage`. `install` now builds and installs the `herrscher` binary.
-- Fold `herrscher-core` packages under `herrscher/core/...`; add `purity_test`.
-- Replace the umbrella's `@herrscher/` symlink scheme with real `require`+`replace`
-  in the composition-root `go.mod`.
-- **Deleting the `herrscherd`, `herrscher-cli`, `herrscher-core` repos is
-  destructive and public — execute ONLY with explicit user go-ahead at that step.**
-
-## 7. Recorded invariants & deferred work (NOT in this scope)
-
-- **Engine invariant.** A future orchestration engine consumes only the universal
-  plugin ports. Engine-specific needs go through optional `Capabilities` + `Degrade`,
-  **never** a new mandatory plugin method. A plugin implementing the base ports
-  works with every engine. (We deliberately do **not** add a `contracts.Engine`
-  seam now — speculative until a second engine exists.)
-- **Orchestrator = mediator over the port graph**, not a second core. It is a port
-  `core` *consults* ("for this context, which backend(s)/gateway(s) and what
-  fallback?"). Default behaviour = today's trivial first/all + static degrade.
-  Owns: selection among N plugins of a category, composition (fan-out/chains),
-  resilience (failover/retry/circuit-break), and cross-cutting policy.
-- **Orchestrator REQUIRES Memory** (hard dependency): its coordination is
-  memory-backed. When the Orchestrator category is activated, the registry must
-  verify a Memory plugin is present at startup, else refuse to start.
-- Phase 1 transport (NATS/gRPC) unchanged by this design.
-
-## 8. Out of scope
-
-No Orchestrator/Memory/Engine implementation here. This spec covers only: the
-single `herrscher` binary, the contracts CLI-command declaration, the dispatcher
-with its conflict policy, the migration of Discord verbs into the plugin, and the
-repo consolidation.
+No `contracts` change. No Discord/plugin change. No command-API work. No core→
+methods refactor. No removal of the existing slash routing. Purely the three-repo
+fold into one `herrscher` binary plus the deletion of the absorbed repos.
