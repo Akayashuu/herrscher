@@ -18,6 +18,12 @@ func TestParseGateways(t *testing.T) {
 		{"trims and drops empties", " discord , , terminal ", false, []string{"discord", "terminal"}},
 		{"dedups", "discord,discord", false, []string{"discord"}},
 		{"flag wins over empty list only", "discord,terminal", true, []string{"discord", "terminal"}},
+		{"bare comma defaults", ",", false, []string{"discord"}},
+		{"all empty separators default", " , , ", false, []string{"discord"}},
+		{"case insensitive", "Discord", false, []string{"discord"}},
+		{"drops invalid path entry", "../discord,terminal", false, []string{"terminal"}},
+		{"drops invalid charset", "bad kind!,discord", false, []string{"discord"}},
+		{"all invalid defaults", "bad kind!", false, []string{"discord"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

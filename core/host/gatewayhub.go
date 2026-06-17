@@ -39,6 +39,11 @@ func BuildHub(ctx context.Context, plugins []contracts.Plugin, getenv func(strin
 			failures = append(failures, fmt.Sprintf("%s: %v", p.Manifest.Kind, err))
 			continue
 		}
+		if set.Gateway == nil {
+			failures = append(failures, fmt.Sprintf("%s: factory returned no gateway", p.Manifest.Kind))
+			continue
+		}
+		// Duplicate Manifest.Kind: keep first-seen order, last factory wins the set.
 		if _, dup := h.sets[p.Manifest.Kind]; !dup {
 			h.order = append(h.order, p.Manifest.Kind)
 		}
@@ -62,7 +67,12 @@ func (h *GatewayHub) Get(kind string) (contracts.GatewaySet, bool) {
 	return s, ok
 }
 
-// First returns the first built gateway set (registration order). It preserves
-// the pre-hub "first registered gateway" behavior for callers not yet
-// gateway-aware.
-func (h *GatewayHub) First() contracts.GatewaySet { return h.sets[h.order[0]] }
+// First returns the first built gateway set (registration order) and whether
+// the hub has one. It preserves the pre-hub "first registered gateway" behavior
+// for callers not yet gateway-aware.
+func (h *GatewayHub) First() (contracts.GatewaySet, bool) {
+	if len(h.order) == 0 {
+		return contracts.GatewaySet{}, false
+	}
+	return h.sets[h.order[0]], true
+}
