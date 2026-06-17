@@ -70,7 +70,29 @@ func TestBuildHubAllFailedAggregates(t *testing.T) {
 
 func TestFirstReturnsRegistrationOrder(t *testing.T) {
 	hub, _ := BuildHub(context.Background(), []contracts.Plugin{gw("discord", false), gw("terminal", false)}, func(string) string { return "" })
-	if hub.First().Gateway == nil {
+	set, ok := hub.First()
+	if !ok {
+		t.Fatal("First() should report a built set")
+	}
+	if set.Gateway == nil {
 		t.Error("First() should return the first built set")
+	}
+}
+
+func TestFirstEmptyHub(t *testing.T) {
+	if _, ok := (&GatewayHub{}).First(); ok {
+		t.Error("First() on an empty hub should report ok=false")
+	}
+}
+
+func TestBuildHubRejectsNilGatewaySet(t *testing.T) {
+	nilSet := contracts.Plugin{
+		Manifest: contracts.Manifest{Kind: "empty", Category: contracts.CategoryGateway},
+		Gateway: func(context.Context, contracts.PluginConfig) (contracts.GatewaySet, error) {
+			return contracts.GatewaySet{}, nil
+		},
+	}
+	if _, err := BuildHub(context.Background(), []contracts.Plugin{nilSet}, func(string) string { return "" }); err == nil {
+		t.Fatal("a factory returning a nil Gateway should be skipped and, as the only plugin, fail the build")
 	}
 }

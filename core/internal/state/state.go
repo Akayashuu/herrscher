@@ -37,7 +37,7 @@ type Session struct {
 // ChannelID is a Discord session; one without is bound to nothing.
 func (s Session) BoundGateways() []string {
 	if len(s.Gateways) > 0 {
-		return s.Gateways
+		return append([]string(nil), s.Gateways...)
 	}
 	if s.ChannelID != "" {
 		return []string{"discord"}

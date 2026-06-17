@@ -127,7 +127,11 @@ func buildGateway(ctx context.Context) (host.Deps, error) {
 	if err != nil {
 		return host.Deps{}, err
 	}
-	return hub.First(), nil
+	set, ok := hub.First()
+	if !ok {
+		return host.Deps{}, fmt.Errorf("no gateway built")
+	}
+	return set, nil
 }
 
 // scanFlag returns the value of --name / -name (space- or =-separated) from a
