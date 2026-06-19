@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/Herrscherd/herrscher/core/cli"
+	"github.com/Herrscherd/herrscher/core/internal/agent"
 	"github.com/Herrscherd/herrscher/core/internal/forge"
 	"github.com/Herrscherd/herrscher/core/internal/manager"
 	"github.com/Herrscherd/herrscher/core/internal/state"
@@ -25,7 +26,8 @@ func buildRegistry(ctx context.Context, d Deps, o Options, st *state.State, sup 
 	fg := forge.New()
 	upCfg, _ := service.DefaultConfig()
 	up := serviceUpdater{cfg: upCfg, st: st}
-	hdl := manager.NewHandler(d.Admin, sup, wt, fg, up, st, o.DefaultCmd, partDir)
+	agents := agent.NewStore(filepath.Join(partDir, "agents"))
+	hdl := manager.NewHandler(d.Admin, sup, wt, fg, up, agents, st, o.DefaultCmd, partDir)
 
 	reg := &cli.Registry{}
 	for _, c := range hdl.Commands() {

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	contracts "github.com/Herrscherd/herrscher-contracts"
+	"github.com/Herrscherd/herrscher/core/internal/agent"
 	"github.com/Herrscherd/herrscher/core/internal/state"
 )
 
@@ -116,7 +117,8 @@ func newTestHandlerWithUpdater(t *testing.T, homeType string) (*Handler, *fakeUp
 	fg := &fakeForge{}
 	up := &fakeUpdater{version: "abc1234"}
 	st := state.NewState(t.TempDir() + "/s.json")
-	return NewHandler(d, sup, wt, fg, up, st, "claude", t.TempDir()), up, d, sup, wt, fg, st
+	agents := agent.NewStore(t.TempDir())
+	return NewHandler(d, sup, wt, fg, up, agents, st, "claude", t.TempDir()), up, d, sup, wt, fg, st
 }
 
 // args builds a command Input from name/value pairs (flags carry "true").
