@@ -573,7 +573,7 @@ plugin (the Discord gateway needs `DISCORD_BOT_TOKEN`).
 
 - `cmd` — the base bridged command for new sessions (a per-session `cmd:` overrides it).
 - `home` — where `/session create` puts channels (a category or a forum), set via `/set home`.
-- `workspace` — root scanned for `project:` and shown by `/workspace list`.
+- `workspace` — root scanned for `project:` (the sub-dir a session's backend works on).
 - `source` — checkout `/service update` rebuilds from.
 
 ---
