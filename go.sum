@@ -10,6 +10,8 @@ github.com/Herrscherd/herrscher-obsidian-memory v0.1.1 h1:zs4eXE86vwJkJxFdjCt1wp
 github.com/Herrscherd/herrscher-obsidian-memory v0.1.1/go.mod h1:ntKFiYHtNYbr6igBgOfCK7xJE3H4Om5DZPTdCX6EbqQ=
 github.com/Herrscherd/herrscher-orchestrator v0.1.1 h1:LE4RgHLUjbbC+AhWoN55AJ/LRT7oMg7JppzM++WzOJ0=
 github.com/Herrscherd/herrscher-orchestrator v0.1.1/go.mod h1:e1NZQzyp36Thp181a4QME6/gq8tlTWYnzPgercld7TI=
+github.com/Herrscherd/herrscher-transport v0.1.0 h1:jT4KP1N/bv9T+hQqouKofXK4JQYKOAOXGrhRqieyOzU=
+github.com/Herrscherd/herrscher-transport v0.1.0/go.mod h1:bCt4DsxyzcI8uVdWfDegxydBpryqYk2ZSC/qsHXWAb0=
 github.com/atotto/clipboard v0.1.4 h1:EH0zSVneZPSuFR11BlR9YppQTVDbh5+16AmcJi4g1z4=
 github.com/atotto/clipboard v0.1.4/go.mod h1:ZY9tmq7sm5xIbd9bOK4onWV4S6X0u6GY7Vn0Yu86PYI=
 github.com/aymanbagabas/go-osc52/v2 v2.0.1 h1:HwpRHbFMcZLEVr42D4p7XBqjyuxQH5SMiErDT4WkJ2k=
