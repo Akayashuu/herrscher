@@ -137,6 +137,55 @@ func TestDriverProgressViewOpensAtTurnStart(t *testing.T) {
 	}, "progress view opened (upserts>0) and final reply posted")
 }
 
+// TestDriverPickForwardsWithoutOpeningTurn proves Pick enqueues a pick frame
+// that pump forwards verbatim to the bridge, and that a pick (unlike an input)
+// does NOT open a turn/progress view on the bound gateways.
+func TestDriverPickForwardsWithoutOpeningTurn(t *testing.T) {
+	a := &fanRecorder{}
+	toBridge := make(chan contracts.Event, 4)
+	fromBridge := make(chan contracts.Event, 4)
+	d := newSessionDriver("s1", []contracts.GatewaySet{{Gateway: a, Reader: a}}, toBridge, fromBridge)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go d.run(ctx)
+
+	d.Pick("2")
+	select {
+	case got := <-toBridge:
+		if got.T != "pick" || got.Value != "2" {
+			t.Fatalf("driver forwarded %+v, want pick/2", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Pick was not forwarded to the bridge")
+	}
+	// The bridge answers the pick out-of-band with a reply.
+	fromBridge <- contracts.Event{T: "reply", Text: "picked", Done: true}
+	waitFor(t, func() bool {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		return len(a.posted) == 1 && a.posted[0] == "picked" && a.upserts == 0
+	}, "pick reply posted without opening a progress view")
+}
+
+// TestPickRegistryRoutesToLiveSession proves the package-level Pick routes to a
+// registered session and reports false for an unknown one.
+func TestPickRegistryRoutesToLiveSession(t *testing.T) {
+	a := &fanRecorder{}
+	acc, err := control.Accept(tmpSock(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer acc.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go RunSession(ctx, "pickreg", []contracts.GatewaySet{{Gateway: a, Reader: a}}, acc)
+
+	waitFor(t, func() bool { return Pick("pickreg", "1") }, "Pick routes to the live session")
+	if Pick("does-not-exist", "1") {
+		t.Fatal("Pick must report false for an unknown session")
+	}
+}
+
 func TestDriverFIFOSerializesTurns(t *testing.T) {
 	a := &fanRecorder{}
 	a.feed("first")

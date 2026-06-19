@@ -3,6 +3,7 @@ package host
 import (
 	"context"
 	"strconv"
+	"sync"
 	"time"
 
 	contracts "github.com/Herrscherd/herrscher-contracts"
@@ -44,6 +45,45 @@ func newSessionDriver(name string, gws []contracts.GatewaySet, toBridge chan<- c
 		queue:     make(chan contracts.Event, 64),
 		renderers: map[string]*gatewayRenderer{},
 	}
+}
+
+// Pick injects a routed select-menu value into this session's turn queue. The
+// bridge answers it out-of-band (serialized with turns) and emits a reply.
+func (d *sessionDriver) Pick(value string) {
+	d.queue <- contracts.Event{T: "pick", Value: value}
+}
+
+// sessionRegistry maps live session names to their driver so an out-of-band
+// input — a routed select-menu pick — can reach the right session's FIFO. It is
+// populated by RunSession for the session's lifetime.
+var sessionRegistry = struct {
+	mu sync.Mutex
+	m  map[string]*sessionDriver
+}{m: map[string]*sessionDriver{}}
+
+func registerDriver(name string, d *sessionDriver) {
+	sessionRegistry.mu.Lock()
+	sessionRegistry.m[name] = d
+	sessionRegistry.mu.Unlock()
+}
+
+func unregisterDriver(name string) {
+	sessionRegistry.mu.Lock()
+	delete(sessionRegistry.m, name)
+	sessionRegistry.mu.Unlock()
+}
+
+// Pick routes a select-menu value to the named session's driver, returning false
+// when no live session by that name is driving.
+func Pick(session, value string) bool {
+	sessionRegistry.mu.Lock()
+	d := sessionRegistry.m[session]
+	sessionRegistry.mu.Unlock()
+	if d == nil {
+		return false
+	}
+	d.Pick(value)
+	return true
 }
 
 // run starts the pollers and the turn pump; it blocks until ctx is cancelled.
@@ -95,7 +135,11 @@ func (d *sessionDriver) pump(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case ev := <-d.queue:
-			d.fanOut(ctx, contracts.Event{T: "human", Who: ev.Who, Text: ev.Text})
+			// A pick is answered out-of-band by the bridge; only a real input
+			// opens a turn (and a progress view) on the bound gateways.
+			if ev.T == "input" {
+				d.fanOut(ctx, contracts.Event{T: "human", Who: ev.Who, Text: ev.Text})
+			}
 			select {
 			case d.toBridge <- ev:
 			case <-ctx.Done():
@@ -168,6 +212,8 @@ func RunSession(ctx context.Context, name string, gws []contracts.GatewaySet, ac
 	toBridge := make(chan contracts.Event)
 	fromBridge := make(chan contracts.Event)
 	d := newSessionDriver(name, gws, toBridge, fromBridge)
+	registerDriver(name, d)
+	defer unregisterDriver(name)
 	go d.run(ctx)
 
 	for {
