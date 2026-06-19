@@ -8,6 +8,13 @@
 // MCP server; the package only stores and materializes them.
 package agent
 
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
 // File names inside an agent home (the durable source of truth).
 const (
 	soulFile     = "SOUL.md"
@@ -25,4 +32,35 @@ const worktreeToken = "{{WORKTREE}}"
 type Agent struct {
 	Name string
 	Home string // absolute path to the agent's home directory
+}
+
+// Materialize provisions the agent into a session worktree by writing the three
+// files Claude Code reads from its working directory:
+//
+//	<worktree>/.mcp.json             (from <home>/mcp.json)
+//	<worktree>/.claude/settings.json (from <home>/settings.json)
+//	<worktree>/.claude/CLAUDE.md     (from <home>/SOUL.md — the layered persona)
+//
+// Any worktreeToken in a source file is replaced with the worktree path.
+func (a Agent) Materialize(worktree string) error {
+	claudeDir := filepath.Join(worktree, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		return fmt.Errorf("create .claude dir: %w", err)
+	}
+	copies := []struct{ src, dst string }{
+		{filepath.Join(a.Home, mcpFile), filepath.Join(worktree, ".mcp.json")},
+		{filepath.Join(a.Home, settingsFile), filepath.Join(claudeDir, "settings.json")},
+		{filepath.Join(a.Home, soulFile), filepath.Join(claudeDir, "CLAUDE.md")},
+	}
+	for _, c := range copies {
+		buf, err := os.ReadFile(c.src)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", filepath.Base(c.src), err)
+		}
+		out := strings.ReplaceAll(string(buf), worktreeToken, worktree)
+		if err := os.WriteFile(c.dst, []byte(out), 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", c.dst, err)
+		}
+	}
+	return nil
 }
