@@ -24,6 +24,7 @@ type Session struct {
 	Backend   string `json:"backend,omitempty"`  // bridge backend ("" or "stream" = stream-json default; "oneshot" = per-message cmd)
 	Worktree  string `json:"worktree,omitempty"` // abs path; empty for a shared session
 	Project   string `json:"project,omitempty"`  // workspace sub-dir the session started from
+	Agent     string `json:"agent,omitempty"`    // durable agent this session was provisioned from ("" = none)
 
 	// Gateways binds the session to a set of gateway kinds (e.g. "discord",
 	// "terminal"). Empty means "legacy": a session with a ChannelID is Discord.
