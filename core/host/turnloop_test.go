@@ -9,6 +9,7 @@ import (
 
 	contracts "github.com/Herrscherd/herrscher-contracts"
 	control "github.com/Herrscherd/herrscher/core/internal/control"
+	"github.com/Herrscherd/herrscher/core/internal/state"
 )
 
 // fanRecorder is a gateway+reader+sink that records what the hub fans to it and
@@ -26,6 +27,12 @@ func (f *fanRecorder) feed(text string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.inbound = append(f.inbound, contracts.Message{ID: "m", ChannelID: "c", Content: text, AuthorName: "you"})
+}
+
+func (f *fanRecorder) feedFrom(text, authorID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.inbound = append(f.inbound, contracts.Message{ID: "m", ChannelID: "c", Content: text, AuthorName: "you", AuthorID: authorID})
 }
 func (f *fanRecorder) Enabled() bool          { return true }
 func (f *fanRecorder) DefaultChannel() string { return "c" }
@@ -178,12 +185,33 @@ func TestPickRegistryRoutesToLiveSession(t *testing.T) {
 	defer acc.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go RunSession(ctx, "pickreg", []contracts.GatewaySet{{Gateway: a, Reader: a}}, acc)
+	go RunSession(ctx, "pickreg", []contracts.GatewaySet{{Gateway: a, Reader: a}}, acc, "")
 
 	waitFor(t, func() bool { return Pick("pickreg", "1") }, "Pick routes to the live session")
 	if Pick("does-not-exist", "1") {
 		t.Fatal("Pick must report false for an unknown session")
 	}
+}
+
+// TestDriverJournalsParticipants proves the daemon driver records message
+// authors in the participants journal (the bridge no longer does), so
+// /session who keeps a source in pure-runner mode.
+func TestDriverJournalsParticipants(t *testing.T) {
+	a := &fanRecorder{}
+	a.feedFrom("hi", "u1")
+	journal := filepath.Join(t.TempDir(), "demo.log")
+	toBridge := make(chan contracts.Event, 4)
+	fromBridge := make(chan contracts.Event, 4)
+	d := newSessionDriver("s1", []contracts.GatewaySet{{Gateway: a, Reader: a}}, toBridge, fromBridge)
+	d.participants = journal
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go d.run(ctx)
+
+	waitFor(t, func() bool {
+		ids := state.ReadParticipants(journal)
+		return len(ids) == 1 && ids[0] == "u1"
+	}, "author journaled for /session who")
 }
 
 func TestDriverFIFOSerializesTurns(t *testing.T) {
@@ -286,7 +314,7 @@ func TestRunSessionReconnectsAndResumes(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go RunSession(ctx, "s1", []contracts.GatewaySet{{Gateway: a, Reader: a}}, acc)
+	go RunSession(ctx, "s1", []contracts.GatewaySet{{Gateway: a, Reader: a}}, acc, "")
 
 	// First bridge connects, gets the input, then dies before replying.
 	c1 := dialCtl(t, sock)

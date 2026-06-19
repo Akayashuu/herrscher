@@ -219,7 +219,7 @@ func RunHub(ctx context.Context, gws []Deps, o Options) error {
 			continue
 		}
 		bound := boundGateways(gws, sess.BoundGateways())
-		go RunSession(ctx, sess.Name, bound, acc)
+		go RunSession(ctx, sess.Name, bound, acc, state.ParticipantsPath(partDir, sess.Name))
 		_ = sup.Start(sess)
 	}
 

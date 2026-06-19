@@ -8,6 +8,7 @@ import (
 
 	contracts "github.com/Herrscherd/herrscher-contracts"
 	control "github.com/Herrscherd/herrscher/core/internal/control"
+	"github.com/Herrscherd/herrscher/core/internal/state"
 )
 
 // pollInterval is how often the driver polls each bound gateway's Read for new
@@ -34,6 +35,12 @@ type sessionDriver struct {
 	from      <-chan contracts.Event
 	queue     chan contracts.Event
 	renderers map[string]*gatewayRenderer
+
+	// participants is the journal path for /session who (empty = disabled). The
+	// daemon owns gateway I/O now, so it records authors here as it polls them.
+	participants string
+	seenMu       sync.Mutex
+	seen         map[string]bool
 }
 
 func newSessionDriver(name string, gws []contracts.GatewaySet, toBridge chan<- contracts.Event, fromBridge <-chan contracts.Event) *sessionDriver {
@@ -44,6 +51,22 @@ func newSessionDriver(name string, gws []contracts.GatewaySet, toBridge chan<- c
 		from:      fromBridge,
 		queue:     make(chan contracts.Event, 64),
 		renderers: map[string]*gatewayRenderer{},
+		seen:      map[string]bool{},
+	}
+}
+
+// journal records a message author in the participants journal (idempotent,
+// best-effort), so /session who has a source now the bridge no longer journals.
+func (d *sessionDriver) journal(authorID string) {
+	if d.participants == "" || authorID == "" {
+		return
+	}
+	d.seenMu.Lock()
+	first := !d.seen[authorID]
+	d.seen[authorID] = true
+	d.seenMu.Unlock()
+	if first {
+		_, _ = state.AppendParticipant(d.participants, authorID)
 	}
 }
 
@@ -111,6 +134,7 @@ func (d *sessionDriver) poll(ctx context.Context, r contracts.ChannelReader) {
 					continue
 				}
 				last = m.ID
+				d.journal(m.AuthorID)
 				select {
 				case d.queue <- contracts.Event{T: "input", Who: m.AuthorName, Text: m.Content}:
 				case <-ctx.Done():
@@ -208,10 +232,11 @@ func gatewayChannel(g contracts.GatewaySet) string {
 // persistent Conn (input frames out, event frames in) to a sessionDriver, and
 // re-binds to a fresh Conn whenever the bridge reconnects (after a crash +
 // supervisor restart). It blocks until ctx is cancelled.
-func RunSession(ctx context.Context, name string, gws []contracts.GatewaySet, acc *control.Acceptor) {
+func RunSession(ctx context.Context, name string, gws []contracts.GatewaySet, acc *control.Acceptor, participants string) {
 	toBridge := make(chan contracts.Event)
 	fromBridge := make(chan contracts.Event)
 	d := newSessionDriver(name, gws, toBridge, fromBridge)
+	d.participants = participants
 	registerDriver(name, d)
 	defer unregisterDriver(name)
 	go d.run(ctx)

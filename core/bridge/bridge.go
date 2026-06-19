@@ -20,17 +20,13 @@ type BackendFactory func(channelID string) (contracts.Backend, error)
 
 // Options configures one bridge run (parsed from CLI flags by the binary).
 type Options struct {
-	Channel       string
-	Ensure        string
-	Interval      int
-	State         string
-	After         string
-	Participants  string // append-only journal of message authors (empty = disabled)
-	Session       string // session name (used to scope participant journals and attachments)
-	Verbose       bool
-	Progress      string // "off" | "actions" | "full" (default "full")
-	ProgressKeep  bool   // keep the full running list instead of collapsing to a summary
-	ControlSocket string // unix socket the daemon forwards select-menu clicks to (empty = numeric-reply fallback only)
+	Channel      string
+	Interval     int
+	State        string
+	Session      string // session name (used to scope attachments)
+	Verbose      bool
+	Progress     string // "off" | "actions" | "full" (default "full")
+	ProgressKeep bool   // keep the full running list instead of collapsing to a summary
 	// HubSocket selects pure-runner (hub) mode: the bridge dials this socket,
 	// reads input/pick frames from the daemon hub, and emits turn events back.
 	HubSocket string

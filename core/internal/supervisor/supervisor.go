@@ -16,7 +16,7 @@ import (
 type Supervisor struct {
 	ctx     context.Context
 	selfBin string // path to the herrscher binary (os.Executable)
-	PartDir string // participants journal dir; empty disables --participants
+	PartDir string // participants journal dir (the daemon hub journals authors now)
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc
 }
@@ -27,9 +27,6 @@ func (s *Supervisor) bridgeArgs(sess state.Session) []string {
 		"--hub-socket", control.SocketPath(sess.Name)}
 	if sess.Backend != "" && sess.Backend != "stream" {
 		args = append(args, "--backend", sess.Backend)
-	}
-	if s.PartDir != "" {
-		args = append(args, "--participants", state.ParticipantsPath(s.PartDir, sess.Name))
 	}
 	return args
 }
