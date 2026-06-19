@@ -86,6 +86,8 @@ func runServe(ctx context.Context, args []string) error {
 		Home:          home,
 		Workspace:     cfg.Workspace,
 		Source:        cfg.Source,
+
+		RemoteCategories: remoteCategories(),
 	}
 
 	// Foreground + interactive TTY → run the TUI as the terminal gateway's

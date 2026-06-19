@@ -2,9 +2,12 @@ package host
 
 import (
 	"context"
-	"fmt"
+	"errors"
+	"time"
 
 	contracts "github.com/Herrscherd/herrscher-contracts"
+	transport "github.com/Herrscherd/herrscher-transport"
+	"github.com/nats-io/nats.go"
 )
 
 // Resolver turns registered plugins into live port objects, choosing local
@@ -24,8 +27,8 @@ func (r *Resolver) isRemote(c contracts.Category) bool {
 }
 
 // Memory resolves the first registered memory plugin. Local: call the factory.
-// Remote: dialed in a later task. Returns nil (no error) when none is registered
-// — memory stays optional, matching buildMemory's contract.
+// Remote: dial a gRPC proxy via NATS announcements. Returns nil (no error) when
+// none is registered — memory stays optional, matching buildMemory's contract.
 func (r *Resolver) Memory(ctx context.Context, plugins []contracts.Plugin, getenv func(string) string) (contracts.Memory, error) {
 	for _, p := range plugins {
 		if p.Memory == nil {
@@ -43,7 +46,42 @@ func (r *Resolver) Memory(ctx context.Context, plugins []contracts.Plugin, geten
 	return nil, nil
 }
 
-// dialRemoteMemory is completed in the next task.
-func (r *Resolver) dialRemoteMemory(_ context.Context, p contracts.Plugin) (contracts.Memory, error) {
-	return nil, fmt.Errorf("resolver: remote memory %q not wired yet", p.Manifest.Kind)
+func (r *Resolver) natsURL() string {
+	if r.NatsURL != "" {
+		return r.NatsURL
+	}
+	return nats.DefaultURL
+}
+
+func (r *Resolver) dialRemoteMemory(ctx context.Context, _ contracts.Plugin) (contracts.Memory, error) {
+	nc, err := nats.Connect(r.natsURL())
+	if err != nil {
+		return nil, err
+	}
+	defer nc.Close()
+	reg := transport.NewRemoteRegistry()
+	seen := make(chan struct{}, 1)
+	if err := transport.WatchAnnouncements(nc, func(a transport.Announcement) {
+		reg.Observe(a)
+		select {
+		case seen <- struct{}{}:
+		default:
+		}
+	}); err != nil {
+		return nil, err
+	}
+	deadline := time.NewTimer(10 * time.Second)
+	defer deadline.Stop()
+	for {
+		if mems := reg.Memories(); len(mems) > 0 {
+			return transport.DialMemory(ctx, mems[0])
+		}
+		select {
+		case <-seen:
+		case <-deadline.C:
+			return nil, errors.New("resolver: no remote memory announced within 10s")
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 }

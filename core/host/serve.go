@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -79,6 +80,10 @@ type Options struct {
 	Home      *HomeRef
 	Workspace string
 	Source    string
+
+	// RemoteCategories lists plugin categories served out-of-process; RunHub
+	// spawns and supervises a plugin-host child per entry. Empty => all in-proc.
+	RemoteCategories map[contracts.Category]bool
 }
 
 // HomeRef is the seed home channel from config.json: a channel id and its kind
@@ -155,6 +160,7 @@ func RunHub(ctx context.Context, gws []Deps, o Options) error {
 	st.ApplyDefaults(home, o.Workspace, o.Source)
 
 	self, _ := os.Executable()
+	startRemotePluginHosts(ctx, self, o.RemoteCategories)
 	partDir := filepath.Dir(o.StatePath) // participants/<name>.log lives beside state.json
 	sup := supervisor.NewSupervisor(ctx, self)
 
@@ -217,6 +223,32 @@ func RunHub(ctx context.Context, gws []Deps, o Options) error {
 	fmt.Fprintln(os.Stderr, "dctl serve: hub up; supervising sessions; bot online.")
 	<-ctx.Done()
 	return ctx.Err()
+}
+
+func startRemotePluginHosts(ctx context.Context, self string, remote map[contracts.Category]bool) {
+	if !remote[contracts.CategoryMemory] {
+		return
+	}
+	go func() {
+		for ctx.Err() == nil {
+			cmd := exec.CommandContext(ctx, self, "plugin-host", "--category", "memory", "--instance", "memory-0")
+			if url := os.Getenv("HERRSCHER_NATS"); url != "" {
+				cmd.Args = append(cmd.Args, "--nats", url)
+			}
+			cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
+			cmd.Env = os.Environ()
+			_ = cmd.Run()
+			if ctx.Err() != nil {
+				return
+			}
+			fmt.Fprintln(os.Stderr, "dctl serve: memory plugin-host exited, restarting in 3s")
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(3 * time.Second):
+			}
+		}
+	}()
 }
 
 // firstProber returns the first gateway's Prober (nil if none expose one).

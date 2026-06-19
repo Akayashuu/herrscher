@@ -85,6 +85,8 @@ func main() {
 		err = runSession(ctx, args)
 	case "service":
 		err = runService(ctx, args)
+	case "plugin-host":
+		err = runPluginHost(ctx, args)
 	case "-h", "--help", "help":
 		usage()
 		return
