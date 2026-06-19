@@ -11,8 +11,9 @@ import (
 	"github.com/Herrscherd/herrscher/core/bridge"
 )
 
-// runBridge links a channel to a backend: it watches for new human messages and,
-// for each, asks the backend for a reply and posts it back as a threaded reply.
+// runBridge runs a pure backend runner against the daemon hub: it dials the hub
+// control socket (--hub-socket), takes one input frame per turn, and streams the
+// backend's events back over the same connection — it does no gateway I/O itself.
 // The default backend is a persistent streaming Claude session keyed on the
 // channel id; --backend (stream|oneshot) and the claude flags below select and
 // configure it.
@@ -22,17 +23,10 @@ func runBridge(ctx context.Context, args []string) error {
 	cmdStr := fs.String("cmd", "", "base command (default 'claude' in stream mode; the per-message program in one-shot mode)")
 	stream := fs.Bool("stream", true, "legacy: only consulted when --backend is unset; --stream=false selects the one-shot backend")
 	model := fs.String("model", "", "model for the persistent claude session (e.g. claude-haiku-4-5-20251001)")
-	ensure := fs.String("ensure", "prospector", "if no channel is set, create/reuse a channel with this name")
-	interval := fs.Int("i", 5, "poll interval in seconds")
-	state := fs.String("state", "", "file to persist the last-seen message id across restarts")
-	participants := fs.String("participants", "", "append-only journal of message authors for /session who")
-	session := fs.String("session", "", "session name (scopes the participant journal and attachment dir)")
-	after := fs.String("after", "", "seed start id for the first run (state file wins once it exists)")
+	session := fs.String("session", "", "session name (scopes the orchestrator/attachment dir)")
 	verbose := fs.Bool("v", false, "log activity to stderr")
-	progress := fs.String("progress", "full", "live activity feedback level: off | actions | full")
-	progressKeep := fs.Bool("progress-keep", false, "keep the full progress list instead of collapsing to a one-line summary")
 	backend := fs.String("backend", "", "responder backend: stream (default) | oneshot")
-	controlSocket := fs.String("control-socket", "", "unix socket the daemon forwards select-menu clicks to (set by the daemon)")
+	hubSocket := fs.String("hub-socket", "", "unix socket of the daemon hub: when set, run as a pure backend runner (no gateway polling)")
 	fs.Parse(args)
 
 	// The backend is the model edge: core never knows which model answers. The
@@ -48,13 +42,6 @@ func runBridge(ctx context.Context, args []string) error {
 		})
 	}
 
-	// Registry-driven wiring, like serve: instantiate the gateway plugin's
-	// GatewaySet from runtime config rather than hand-wiring Discord. The bridge
-	// loop needs the channel reader and the outbound messaging port.
-	set, err := buildGateway(ctx)
-	if err != nil {
-		return err
-	}
 	mem := buildMemory(ctx, *verbose)
 	if mem != nil {
 		defer mem.Close()
@@ -63,18 +50,9 @@ func runBridge(ctx context.Context, args []string) error {
 	if orch != nil {
 		defer orch.Close()
 	}
-	return bridge.Run(ctx, set.Reader, contracts.Degrade(set.Gateway), newBackend, orch, nil, bridge.Options{
-		Channel:       *ch,
-		Ensure:        *ensure,
-		Interval:      *interval,
-		State:         *state,
-		Participants:  *participants,
-		Session:       *session,
-		After:         *after,
-		Verbose:       *verbose,
-		Progress:      *progress,
-		ProgressKeep:  *progressKeep,
-		ControlSocket: *controlSocket,
+	return bridge.Run(ctx, newBackend, orch, bridge.Options{
+		Channel:   *ch,
+		HubSocket: *hubSocket,
 	})
 }
 
@@ -138,7 +116,3 @@ func buildOrchestrator(ctx context.Context, mem contracts.Memory, session string
 	}
 	return nil
 }
-
-// bridgeOptionsHasParticipants exists so a compile-time test can assert the
-// --participants journal is wired into bridge.Options.
-var bridgeOptionsHasParticipants = bridge.Options{}.Participants

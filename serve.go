@@ -7,9 +7,12 @@ import (
 	"os"
 	"strings"
 
+	"golang.org/x/term"
+
 	"github.com/Herrscherd/herrscher-contracts"
 	"github.com/Herrscherd/herrscher/core/config"
 	"github.com/Herrscherd/herrscher/core/host"
+	"github.com/Herrscherd/herrscher/plugins/terminal/tui"
 )
 
 // or returns a if non-empty, else b — used to layer config.json defaults under
@@ -61,12 +64,19 @@ func runServe(ctx context.Context, args []string) error {
 	// contracts.Default from its init() (blank import in plugins.go); here we build
 	// the first gateway's GatewaySet from runtime config. Adding a gateway is a
 	// blank import + rebuild — no code change here.
-	deps, err := buildGateway(ctx)
+	hub, err := host.BuildHub(ctx, contracts.Default.Gateways(), os.Getenv)
 	if err != nil {
 		return err
 	}
-	deps.Gateway = contracts.Degrade(deps.Gateway)
-	return host.Run(ctx, deps, host.Options{
+	var gws []host.Deps
+	for _, kind := range hub.Kinds() {
+		if set, ok := hub.Get(kind); ok {
+			set.Gateway = contracts.Degrade(set.Gateway)
+			gws = append(gws, set)
+		}
+	}
+
+	opts := host.Options{
 		StatePath:     *statePath,
 		DefaultCmd:    *defaultCmd,
 		HealthAddr:    *healthAddr,
@@ -76,7 +86,18 @@ func runServe(ctx context.Context, args []string) error {
 		Home:          home,
 		Workspace:     cfg.Workspace,
 		Source:        cfg.Source,
-	})
+	}
+
+	// Foreground + interactive TTY → run the TUI as the terminal gateway's
+	// frontend; quitting it cancels ctx and stops the daemon. Background service
+	// (no TTY) → headless, terminal gateway absent, only remote gateways run.
+	if term.IsTerminal(int(os.Stdout.Fd())) {
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		go func() { _ = host.RunHub(ctx, gws, opts) }()
+		return tui.Run(ctx, cancel)
+	}
+	return host.RunHub(ctx, gws, opts)
 }
 
 // runSession dispatches the operator `session` commands (create/close/list/who)

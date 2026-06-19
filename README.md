@@ -119,7 +119,7 @@ what it needs at startup and instantiates it with live config.
 
 | Category | Edge | Port(s) | Status | Official plugin |
 |----------|------|---------|--------|-----------------|
-| 🔌 **Gateway** | channel (inbound) | `Gateway`, `ChannelSource`, `ChannelReader`, `ChannelAdmin`, `CommandRegistrar`, `Prober`, `MenuRouter`, `Responder` | ✅ live | [herrscher-discord-gateway] |
+| 🔌 **Gateway** | channel (inbound) | `Gateway`, `ChannelSource`, `ChannelReader`, `ChannelAdmin`, `CommandRegistrar`, `Prober`, `MenuRouter`, `Responder`, `EventSink` (smart gateways) | ✅ live | [herrscher-discord-gateway], in-tree `terminal` |
 | 🧠 **Backend** | model (outbound) | `Backend` (+ `ChoiceAware`, `ChoiceInjector`) | ✅ live | [herrscher-claude-backend] |
 | 🗄️ **Memory** | recall / persistence | `Memory` | ✅ live | [herrscher-obsidian-memory] |
 | 🪢 **Orchestrator** | conversation policy | `Orchestrator` | ✅ live | [herrscher-orchestrator] |
@@ -133,6 +133,13 @@ All four categories have an official plugin. **Orchestrator** is a
 conversation-policy port; the default stack ships the published
 `herrscher-orchestrator` module (the `basic` kind). Every plugin plugs in the
 same way — a blank import and a rebuild, no domain change.
+
+Gateways come in two flavours. A plain gateway exposes only the read/post ports
+and is driven by the host-side renderer. A **smart gateway** also implements
+`EventSink` and renders the live turn stream itself — the in-tree **`terminal`**
+gateway (`plugins/terminal`) is one: a Bubbletea TUI that `serve` brings up in
+the foreground as a first-class peer of Discord, so the terminal is a real
+gateway, not a debug console.
 
 ```mermaid
 flowchart LR
@@ -179,49 +186,66 @@ plugin).
 
 ## How a message flows
 
-End to end, from a human typing in a channel to the reply landing back:
+The **daemon (hub)** owns all gateway I/O. Each session's driver polls every
+bound gateway for input, serializes those inputs through a per-session FIFO, and
+hands one input frame per turn to a **pure-runner bridge** over a persistent
+control socket. The bridge talks only to the backend; it streams the turn's
+events back over the same socket, and the hub fans them out to every bound
+gateway. One turn is active at a time: the next queued input is sent only after
+the current turn's terminal `reply{done}`.
 
 ```mermaid
 sequenceDiagram
     actor U as Human
-    participant CH as Channel (Discord)
+    participant CH as Channel (Discord / terminal)
     participant GW as Gateway plugin
-    participant BR as Bridge loop (core)
+    participant HUB as Hub session driver (core/host)
+    participant BR as Bridge (pure runner)
     participant BE as Backend plugin
     participant M as Model (Claude)
 
     U->>CH: types a message
-    BR->>GW: Read(channel, after=lastID)
-    GW-->>BR: [Message{content, author, attachments}]
-    Note over BR: authorize (global + per-session allowlist)<br/>skip if not allowed
-    BR->>GW: React(msg, "👀") — acknowledge pickup
+    HUB->>GW: Read(channel, after=lastID)
+    GW-->>HUB: [Message{content, author, attachments}]
+    Note over HUB: enqueue on the session FIFO<br/>(one active turn at a time)
+    HUB->>BR: input frame (over control socket)
     BR->>BE: Respond(Prompt, onEvent)
     BE->>M: stream prompt
     loop streaming
         M-->>BE: tool calls · text · cost
         BE-->>BR: onEvent(BackendEvent)
-        BR->>GW: UpsertStatusMessage(live progress)
+        BR-->>HUB: chunk / status events
+        HUB->>GW: fan out to every bound gateway<br/>(EventSink renders itself; others via host renderer)
     end
     M-->>BE: final answer
     BE-->>BR: output string
-    BR->>GW: Reply(msg, chunk) — split to 2000 chars
-    GW->>CH: posts threaded reply
-    BR->>GW: Unreact("👀") + React("✅")
-    Note over BR: persist lastID → resume here on restart
+    BR-->>HUB: reply{Done:true}
+    HUB->>GW: post final reply (split to 2000 chars)
+    GW->>CH: shows the reply
+    Note over HUB: turn ends → next FIFO input may start
 ```
 
+A **smart gateway** (the terminal) implements `EventSink` and renders the live
+event stream itself; a non-`EventSink` gateway (Discord) is driven by the
+host-side renderer, which posts the enriched progress message and final reply.
+
 If the model hits a permission prompt mid-turn, the backend exposes a
-`PendingChoice`; when a control socket and the `MenuRouter` capability are both
-present, the bridge posts a **select menu** keyed to the session, the daemon
-forwards the click back over the socket, and the choice is injected into the live
-session (`InjectChoice`). Otherwise it degrades to a plain-text prompt.
+`PendingChoice`; when the `MenuRouter` capability is present, the gateway posts a
+**select menu** keyed to the session, the hub routes the click to the session's
+FIFO (`Pick`), and the bridge injects the choice into the live session
+(`InjectChoice`) out-of-band. Otherwise it degrades to a plain-text prompt.
 
 ---
 
 ## The two run modes
 
-The same binary runs in two shapes. **`serve`** is the always-on daemon you
-install as a service; it supervises one **`bridge`** child process per session.
+The same binary runs in two shapes. **`serve`** is the always-on daemon (the
+multi-gateway **hub**, `host.RunHub`) you install as a service; it owns all
+gateway I/O and supervises one pure-runner **`bridge`** child process per
+session. When `serve` runs in the foreground on an interactive TTY, it also
+brings up the **terminal gateway**: an in-process Bubbletea TUI that is a
+first-class gateway peer of Discord (quitting it stops the daemon). A background
+service (no TTY) runs headless with only the remote gateways.
 
 > **Command surface (current):** session and service commands now run through the
 > operator **CLI** (`herrscher session create|close|list|who`, `herrscher service
@@ -246,25 +270,26 @@ flowchart TB
     LOOP -->|gateway error| RECON["reconnect in 3s"] --> LOOP
 ```
 
-### `bridge` — the per-session poll loop
+### `bridge` — the pure-runner backend loop
 
 ```mermaid
 flowchart TB
-    P(["herrscher bridge -c CHANNEL"]) --> READ["Read(channel, 100, lastID)<br/>every --i seconds"]
-    READ --> EACH{"for each new message"}
-    EACH -->|bot author| SKIP1["skip (no loops)"] --> EACH
-    EACH -->|not allowed| SKIP2["journal author, skip"] --> EACH
-    EACH -->|allowed| ACK["React 👀 · download attachments"]
-    ACK --> RESP["backend.Respond(prompt, onEvent)"]
-    RESP --> PROG["onEvent → live status message"]
-    RESP --> OUT["chunk output to 2000 chars<br/>Reply() each chunk in-thread"]
-    OUT --> DONE["Unreact 👀 · React ✅<br/>persist lastID"]
-    DONE --> READ
+    P(["herrscher bridge -c CHANNEL --hub-socket …"]) --> DIAL["Dial the hub control socket"]
+    DIAL --> WAIT{"read next frame from the hub"}
+    WAIT -->|input| RESP["backend.Respond(prompt, onEvent)"]
+    WAIT -->|pick| INJ["backend.InjectChoice(value)"]
+    RESP --> EV["onEvent → emit chunk / status events over the socket"]
+    EV --> DONE["emit reply{Done:true}"]
+    INJ --> DONE
+    DONE --> WAIT
+    WAIT -->|socket closed| EXIT["exit → supervisor restarts + reconnects"]
 ```
 
-State (the last-seen message id) is persisted every message, so a restarted
-bridge resumes exactly where it left off. Authorization re-reads the daemon's
-`state.json` only when the file's mtime changes — cheap per-poll.
+The bridge does **no** gateway I/O: it never reads a channel, posts, or reacts.
+It is a stateless backend runner driven entirely by the hub's input frames. The
+hub owns the FIFO and connection lifecycle, so if the bridge crashes the
+supervisor restarts it and it re-dials the same socket, resuming with the next
+queued input. Authorization and message-id tracking live in the hub, not here.
 
 ---
 
@@ -401,7 +426,7 @@ gateway plugin alone.
 | Command | What it does |
 |---------|--------------|
 | `serve [--config PATH] [--state FILE] [--health-addr ADDR] [--status-channel ID] [--env-file PATH] [--instance SLUG] [--cmd '…']` | The always-on Gateway daemon: per-session bridge supervision, health endpoint. |
-| `bridge -c CHANNEL [--cmd '…'] [--backend stream\|oneshot] [--model M] [-i 5] [--state FILE] [--progress off\|actions\|full] …` | One channel ⇄ one backend poll loop. Normally spawned by `serve`, runnable standalone. |
+| `bridge -c CHANNEL --hub-socket SOCK [--cmd '…'] [--backend stream\|oneshot] [--model M] [--session N] …` | One pure-runner backend over the daemon's control socket. Normally spawned by `serve`. |
 | `session <create\|close\|list\|who> [--name N] [--project P] [--clone R] [--cmd '…'] [--backend stream\|oneshot] [--shared] [--force]` | Manage sessions: create a bridged channel + worktree + backend, close one, or list/inspect active ones. |
 | `service <install\|uninstall\|status\|restart\|update> [--cmd '…'] [--health-addr ADDR] [--env-file PATH] [--source DIR] [--no-pull]` | Manage the daemon as a native OS service (see [Installation](#installation)). |
 

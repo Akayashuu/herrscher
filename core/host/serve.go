@@ -8,6 +8,7 @@ import (
 	"time"
 
 	contracts "github.com/Herrscherd/herrscher-contracts"
+	control "github.com/Herrscherd/herrscher/core/internal/control"
 	"github.com/Herrscherd/herrscher/core/internal/health"
 	"github.com/Herrscherd/herrscher/core/internal/instanceid"
 	"github.com/Herrscherd/herrscher/core/internal/state"
@@ -133,11 +134,13 @@ func resolveInstanceID(st *state.State, optID, ownerID string) (string, error) {
 	return resolved, nil
 }
 
-// Run is the always-on Gateway daemon: it supervises one bridge per persisted
-// session and serves health/liveness. Command dispatch no longer runs here —
-// session/service commands run through the operator CLI (see NewRegistry);
-// gateway command binding returns in the dctl phase.
-func Run(ctx context.Context, d Deps, o Options) error {
+// RunHub is the always-on multi-gateway daemon: it supervises one pure-runner
+// bridge per persisted session, drives each session's turns over a control
+// Acceptor (fanning events out to every bound gateway), and serves
+// health/liveness. gws are the gateway sets the daemon owns (built from the
+// registry by the caller). Command dispatch no longer runs here —
+// session/service commands run through the operator CLI (see NewRegistry).
+func RunHub(ctx context.Context, gws []Deps, o Options) error {
 	h := health.NewHealth(time.Now())
 
 	st, err := state.LoadState(o.StatePath)
@@ -155,9 +158,15 @@ func Run(ctx context.Context, d Deps, o Options) error {
 	self, _ := os.Executable()
 	partDir := filepath.Dir(o.StatePath) // participants/<name>.log lives beside state.json
 	sup := supervisor.NewSupervisor(ctx, self)
-	sup.PartDir = partDir
-	// Restart persisted sessions.
+
 	for _, sess := range st.SnapshotSessions() {
+		acc, err := control.Accept(control.SocketPath(sess.Name))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dctl serve: session %q: control socket: %v\n", sess.Name, err)
+			continue
+		}
+		bound := boundGateways(gws, sess.BoundGateways())
+		go RunSession(ctx, sess.Name, bound, acc, state.ParticipantsPath(partDir, sess.Name))
 		_ = sup.Start(sess)
 	}
 	h.SetSessions(len(st.SnapshotSessions()))
@@ -177,15 +186,58 @@ func Run(ctx context.Context, d Deps, o Options) error {
 		fmt.Fprintf(os.Stderr, "dctl serve: plugin %s (%s)\n", p.Manifest.Kind, p.Manifest.Category)
 	}
 
+	// Liveness uses the first gateway exposing each port (e.g. Discord): ping a
+	// Prober for reachability, and maintain the status embed via a Reader.
 	if o.HealthAddr != "" {
 		go serveHealth(ctx, o.HealthAddr, h)
 	}
-	go pingLoop(ctx, d.Prober, h)
-	if o.StatusChannel != "" && d.Reader != nil {
-		go statusLoop(ctx, d.Reader, o.StatusChannel, st, h, instID)
+	if pr := firstProber(gws); pr != nil {
+		go pingLoop(ctx, pr, h)
+	}
+	if o.StatusChannel != "" {
+		if cr := firstReader(gws); cr != nil {
+			go statusLoop(ctx, cr, o.StatusChannel, st, h, instID)
+		}
 	}
 
-	fmt.Fprintln(os.Stderr, "dctl serve: supervising sessions; bot online.")
+	fmt.Fprintln(os.Stderr, "dctl serve: hub up; supervising sessions; bot online.")
 	<-ctx.Done()
 	return ctx.Err()
+}
+
+// firstProber returns the first gateway's Prober (nil if none expose one).
+func firstProber(gws []Deps) contracts.Prober {
+	for _, g := range gws {
+		if g.Prober != nil {
+			return g.Prober
+		}
+	}
+	return nil
+}
+
+// firstReader returns the first gateway's ChannelReader (nil if none expose one).
+func firstReader(gws []Deps) contracts.ChannelReader {
+	for _, g := range gws {
+		if g.Reader != nil {
+			return g.Reader
+		}
+	}
+	return nil
+}
+
+// boundGateways selects, from all built gateway sets, those whose kind is in the
+// session's bound set. A bound kind that wasn't built is skipped (its config was
+// absent).
+func boundGateways(all []Deps, kinds []string) []Deps {
+	want := map[string]bool{}
+	for _, k := range kinds {
+		want[k] = true
+	}
+	var out []Deps
+	for _, g := range all {
+		if g.Gateway != nil && want[g.Gateway.Manifest().Kind] {
+			out = append(out, g)
+		}
+	}
+	return out
 }

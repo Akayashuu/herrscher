@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Herrscherd/herrscher/core/internal/control"
 	"github.com/Herrscherd/herrscher/core/internal/state"
 )
 
@@ -15,19 +16,16 @@ import (
 type Supervisor struct {
 	ctx     context.Context
 	selfBin string // path to the herrscher binary (os.Executable)
-	PartDir string // participants journal dir; empty disables --participants
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc
 }
 
 // bridgeArgs builds the child `herrscher bridge` argv for sess.
 func (s *Supervisor) bridgeArgs(sess state.Session) []string {
-	args := []string{"bridge", "-c", sess.ChannelID, "--cmd", sess.Cmd, "--session", sess.Name}
+	args := []string{"bridge", "-c", sess.ChannelID, "--cmd", sess.Cmd, "--session", sess.Name,
+		"--hub-socket", control.SocketPath(sess.Name)}
 	if sess.Backend != "" && sess.Backend != "stream" {
 		args = append(args, "--backend", sess.Backend)
-	}
-	if s.PartDir != "" {
-		args = append(args, "--participants", state.ParticipantsPath(s.PartDir, sess.Name))
 	}
 	return args
 }
