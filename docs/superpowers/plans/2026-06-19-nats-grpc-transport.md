@@ -1002,6 +1002,29 @@ as a supervised child. The child builds the real plugin from `contracts.Default`
 starts a gRPC server on an ephemeral port, and announces over NATS. The resolver
 watches announcements, then dials a proxy.
 
+> **Controller amendments (override the snippets below where they differ):**
+>
+> 1. **Heartbeat the announcement, don't announce once.** NATS core pub-sub has
+>    no replay: a resolver that subscribes *after* a single boot announce never
+>    sees it (this is exactly the ordering in the Step 5 test). The plugin-host
+>    must re-announce on a `time.Ticker` (every 2s) until `ctx` is done — see the
+>    corrected Step 1 below. This also gives presence/liveness for free.
+> 2. **Spawn lives in `RunHub`, not `runServe`.** `runServe` wraps `ctx` in a
+>    cancelable child only inside the TTY branch, so spawning there can't tie the
+>    child to the daemon lifetime in both paths. Add a field to `host.Options`:
+>    `RemoteCategories map[contracts.Category]bool`; set it in `runServe`
+>    (`RemoteCategories: remoteCategories()`); spawn from `RunHub` (it already
+>    holds the unified daemon `ctx` and `self`). See corrected Step 4.
+> 3. **go.mod / the unpublished transport dep.** `herrscher-transport` is not yet
+>    published, so `go get github.com/Herrscherd/herrscher-transport` will fail.
+>    Do NOT run it. Add the require line manually with the workspace placeholder
+>    `github.com/Herrscherd/herrscher-transport v0.0.0-00010101000000-000000000000`
+>    (go.work resolves it locally; the tag is filled in at release, Task 10).
+>    `go get` the nats deps normally (`github.com/nats-io/nats.go@v1.37.0` and
+>    test-only `github.com/nats-io/nats-server/v2@v2.10.22`); they are published.
+> 4. **Callback type is `transport.Announcement`** (not `contracts.Announcement`)
+>    and `dialRemoteMemory` should `defer nc.Close()` once it has dialed.
+
 - [ ] **Step 1: Write pluginhost.go (the child subcommand)**
 
 ```go
