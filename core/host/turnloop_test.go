@@ -18,6 +18,7 @@ type fanRecorder struct {
 	inbound []contracts.Message
 	emitted []contracts.Event
 	posted  []string
+	upserts int
 	sink    bool // implements EventSink when true
 }
 
@@ -40,6 +41,9 @@ func (f *fanRecorder) Read(context.Context, string, int, string) ([]contracts.Me
 }
 func (f *fanRecorder) Unreact(context.Context, string, string, string) error { return nil }
 func (f *fanRecorder) UpsertStatusMessage(context.Context, string, string, string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.upserts++
 	return "", nil
 }
 func (f *fanRecorder) Manifest() contracts.Manifest { return contracts.Manifest{Kind: "rec"} }
@@ -107,6 +111,32 @@ func TestDriverFanOutToAllBoundGateways(t *testing.T) {
 	}, "reply fanned to both gateways")
 }
 
+// TestDriverProgressViewOpensAtTurnStart proves the non-EventSink renderer opens
+// its live progress view at turn start (driven by the synthesized "human" event),
+// so a mid-turn status renders before the final reply is posted.
+func TestDriverProgressViewOpensAtTurnStart(t *testing.T) {
+	a := &fanRecorder{}
+	a.feed("hello")
+	toBridge := make(chan contracts.Event, 4)
+	fromBridge := make(chan contracts.Event, 4)
+	d := newSessionDriver("s1", []contracts.GatewaySet{{Gateway: a, Reader: a}}, toBridge, fromBridge)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go d.run(ctx)
+
+	if got := <-toBridge; got.T != "input" || got.Text != "hello" {
+		t.Fatalf("driver wrote %+v, want input/hello", got)
+	}
+	fromBridge <- contracts.Event{T: "status", Text: "running"}
+	fromBridge <- contracts.Event{T: "reply", Text: "world", Done: true}
+
+	waitFor(t, func() bool {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		return a.upserts > 0 && len(a.posted) == 1 && a.posted[0] == "world"
+	}, "progress view opened (upserts>0) and final reply posted")
+}
+
 func TestDriverFIFOSerializesTurns(t *testing.T) {
 	a := &fanRecorder{}
 	a.feed("first")
@@ -165,9 +195,10 @@ func TestDriverResetMidTurnDoesNotEndTurn(t *testing.T) {
 	waitFor(t, func() bool {
 		rec.mu.Lock()
 		defer rec.mu.Unlock()
-		return len(rec.emitted) == 2 &&
-			rec.emitted[0].T == "reset" && rec.emitted[1].T == "chunk"
-	}, "reset and chunk fanned to EventSink before reply")
+		return len(rec.emitted) == 3 &&
+			rec.emitted[0].T == "human" &&
+			rec.emitted[1].T == "reset" && rec.emitted[2].T == "chunk"
+	}, "human, reset and chunk fanned to EventSink before reply")
 
 	select {
 	case got := <-toBridge:

@@ -95,6 +95,7 @@ func (d *sessionDriver) pump(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case ev := <-d.queue:
+			d.fanOut(ctx, contracts.Event{T: "human", Who: ev.Who, Text: ev.Text})
 			select {
 			case d.toBridge <- ev:
 			case <-ctx.Done():
