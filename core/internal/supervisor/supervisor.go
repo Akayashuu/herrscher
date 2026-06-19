@@ -16,7 +16,6 @@ import (
 type Supervisor struct {
 	ctx     context.Context
 	selfBin string // path to the herrscher binary (os.Executable)
-	PartDir string // participants journal dir (the daemon hub journals authors now)
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc
 }

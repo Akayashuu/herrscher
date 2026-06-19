@@ -37,7 +37,6 @@ func NewRegistry(ctx context.Context, d Deps, o Options) (*cli.Registry, error) 
 	self, _ := os.Executable()
 	partDir := filepath.Dir(o.StatePath)
 	sup := supervisor.NewSupervisor(ctx, self)
-	sup.PartDir = partDir
 	wt := worktree.NewWorktreer(ctx, instID)
 	fg := forge.New()
 	upCfg, _ := service.DefaultConfig()

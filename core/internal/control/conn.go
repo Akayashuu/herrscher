@@ -20,7 +20,7 @@ type Conn struct {
 
 func newConn(c net.Conn) *Conn { return &Conn{c: c} }
 
-// Write sends one Event as a JSON line. Safe for concurrent callers.
+// Write sends one Event as a JSON line.
 func (k *Conn) Write(e contracts.Event) error {
 	k.mu.Lock()
 	defer k.mu.Unlock()
@@ -39,12 +39,10 @@ func (k *Conn) Scan(fn func(contracts.Event) error) error {
 	return ScanEvents(k.c, fn)
 }
 
-// Close closes the underlying connection.
 func (k *Conn) Close() error { return k.c.Close() }
 
 // Acceptor listens on a control socket and yields one persistent Conn per
-// dialing bridge. Unlike the one-shot Server (single pick per connection) it
-// keeps each connection open for the session's life.
+// dialing bridge, keeping each connection open for the session's life.
 type Acceptor struct {
 	ln    net.Listener
 	conns chan *Conn
@@ -77,7 +75,6 @@ func (a *Acceptor) loop() {
 // Conns yields each bridge connection; it closes when the Acceptor is closed.
 func (a *Acceptor) Conns() <-chan *Conn { return a.conns }
 
-// Close stops listening and removes the socket file.
 func (a *Acceptor) Close() error {
 	err := a.ln.Close()
 	_ = os.Remove(a.ln.Addr().String())

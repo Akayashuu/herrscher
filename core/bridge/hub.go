@@ -41,7 +41,7 @@ func runHub(ctx context.Context, newBackend BackendFactory, orch contracts.Orche
 		})
 	}()
 
-	runHubTurns(ctx, in, conn, resp, orch, o)
+	runHubTurns(ctx, in, conn, resp, orch)
 	return ctx.Err()
 }
 
@@ -50,7 +50,7 @@ func runHub(ctx context.Context, newBackend BackendFactory, orch contracts.Orche
 // in-memory channel + sink without a real socket. FIFO is inherent: the hub
 // sends the next input only after it sees this turn's reply{done}, and this
 // loop processes one frame at a time anyway.
-func runHubTurns(ctx context.Context, in <-chan contracts.Event, sink contracts.EventSink, resp contracts.Backend, orch contracts.Orchestrator, o Options) {
+func runHubTurns(ctx context.Context, in <-chan contracts.Event, sink contracts.EventSink, resp contracts.Backend, orch contracts.Orchestrator) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -61,9 +61,9 @@ func runHubTurns(ctx context.Context, in <-chan contracts.Event, sink contracts.
 			}
 			switch ev.T {
 			case "pick":
-				runPick(ctx, sink, resp, ev.Value, o)
+				runPick(ctx, sink, resp, ev.Value)
 			default: // "input" (and any human-origin frame)
-				runOneTurn(ctx, sink, resp, orch, ev, o)
+				runOneTurn(ctx, sink, resp, orch, ev)
 			}
 		}
 	}
@@ -72,7 +72,7 @@ func runHubTurns(ctx context.Context, in <-chan contracts.Event, sink contracts.
 // runOneTurn runs a single backend turn for an input frame, streaming chunk/
 // status events and a terminal reply{done}. An empty output still emits
 // reply{done} so the hub's FIFO can advance.
-func runOneTurn(ctx context.Context, sink contracts.EventSink, resp contracts.Backend, orch contracts.Orchestrator, ev contracts.Event, o Options) {
+func runOneTurn(ctx context.Context, sink contracts.EventSink, resp contracts.Backend, orch contracts.Orchestrator, ev contracts.Event) {
 	var memCtx string
 	if orch != nil {
 		memCtx = orch.Context(ctx)
@@ -92,7 +92,7 @@ func runOneTurn(ctx context.Context, sink contracts.EventSink, resp contracts.Ba
 
 // runPick answers a routed select-menu pick out-of-band (serialized with turns
 // by runHubTurns), emitting whatever the backend produces as a reply{done}.
-func runPick(ctx context.Context, sink contracts.EventSink, resp contracts.Backend, value string, o Options) {
+func runPick(ctx context.Context, sink contracts.EventSink, resp contracts.Backend, value string) {
 	inj, ok := resp.(contracts.ChoiceInjector)
 	if !ok {
 		return

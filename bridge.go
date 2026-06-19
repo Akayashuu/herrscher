@@ -11,8 +11,9 @@ import (
 	"github.com/Herrscherd/herrscher/core/bridge"
 )
 
-// runBridge links a channel to a backend: it watches for new human messages and,
-// for each, asks the backend for a reply and posts it back as a threaded reply.
+// runBridge runs a pure backend runner against the daemon hub: it dials the hub
+// control socket (--hub-socket), takes one input frame per turn, and streams the
+// backend's events back over the same connection — it does no gateway I/O itself.
 // The default backend is a persistent streaming Claude session keyed on the
 // channel id; --backend (stream|oneshot) and the claude flags below select and
 // configure it.

@@ -158,7 +158,6 @@ func RunHub(ctx context.Context, gws []Deps, o Options) error {
 	self, _ := os.Executable()
 	partDir := filepath.Dir(o.StatePath) // participants/<name>.log lives beside state.json
 	sup := supervisor.NewSupervisor(ctx, self)
-	sup.PartDir = partDir
 
 	for _, sess := range st.SnapshotSessions() {
 		acc, err := control.Accept(control.SocketPath(sess.Name))

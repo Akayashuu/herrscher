@@ -244,8 +244,8 @@ func TestDriverFIFOSerializesTurns(t *testing.T) {
 // is fanned out (not swallowed) and does NOT complete the turn: the next queued
 // input must not pump until the real reply{done} arrives.
 func TestDriverResetMidTurnDoesNotEndTurn(t *testing.T) {
-	a := &fanRecorder{}      // input source (non-sink: only final reply posted)
-	rec := &sinkRecorder{}   // EventSink gateway: receives the full stream
+	a := &fanRecorder{}    // input source (non-sink: only final reply posted)
+	rec := &sinkRecorder{} // EventSink gateway: receives the full stream
 	a.feed("first")
 	a.feed("second")
 
@@ -368,7 +368,7 @@ func TestRunSessionReconnectsAfterCompletedTurn(t *testing.T) {
 	gotInput(t, c2, "q2")
 }
 
-func tmpSock(t *testing.T) string { t.Helper(); return filepath.Join(t.TempDir(), "h.sock") }
+func tmpSock(t *testing.T) string                      { t.Helper(); return filepath.Join(t.TempDir(), "h.sock") }
 func acceptCtl(sock string) (*control.Acceptor, error) { return control.Accept(sock) }
 func dialCtl(t *testing.T, sock string) *control.Conn {
 	t.Helper()
