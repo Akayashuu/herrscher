@@ -13,6 +13,17 @@ type recordSink struct{ events []contracts.Event }
 
 func (s *recordSink) Emit(e contracts.Event) { s.events = append(s.events, e) }
 
+// fakeBackend emits one text event then returns a fixed reply.
+type fakeBackend struct{ reply string }
+
+func (b fakeBackend) Respond(_ context.Context, _ contracts.Prompt, onEvent func(contracts.BackendEvent)) (string, error) {
+	if onEvent != nil {
+		onEvent(contracts.BackendEvent{Kind: "text", Detail: "thinking"})
+	}
+	return b.reply, nil
+}
+func (fakeBackend) Close() error { return nil }
+
 func TestRunHubOneTurn(t *testing.T) {
 	sink := &recordSink{}
 	in := make(chan contracts.Event, 2)

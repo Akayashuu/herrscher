@@ -49,13 +49,6 @@ func runBridge(ctx context.Context, args []string) error {
 		})
 	}
 
-	// Registry-driven wiring, like serve: instantiate the gateway plugin's
-	// GatewaySet from runtime config rather than hand-wiring Discord. The bridge
-	// loop needs the channel reader and the outbound messaging port.
-	set, err := buildGateway(ctx)
-	if err != nil {
-		return err
-	}
 	mem := buildMemory(ctx, *verbose)
 	if mem != nil {
 		defer mem.Close()
@@ -64,7 +57,7 @@ func runBridge(ctx context.Context, args []string) error {
 	if orch != nil {
 		defer orch.Close()
 	}
-	return bridge.Run(ctx, set.Reader, contracts.Degrade(set.Gateway), newBackend, orch, nil, bridge.Options{
+	return bridge.Run(ctx, newBackend, orch, bridge.Options{
 		Channel:       *ch,
 		Ensure:        *ensure,
 		Interval:      *interval,
