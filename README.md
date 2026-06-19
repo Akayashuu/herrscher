@@ -217,10 +217,10 @@ sequenceDiagram
         BR-->>HUB: chunk / status events
         HUB->>GW: fan out to every bound gateway<br/>(EventSink renders itself; others via host renderer)
     end
-    M-->>BE: final answer
+    M-->>BE: final answer (+ total cost)
     BE-->>BR: output string
-    BR-->>HUB: reply{Done:true}
-    HUB->>GW: post final reply (split to 2000 chars)
+    BR-->>HUB: reply{Done:true, Cost}
+    HUB->>GW: post final reply (split to 2000 chars)<br/>+ cost in the progress summary
     GW->>CH: shows the reply
     Note over HUB: turn ends → next FIFO input may start
 ```

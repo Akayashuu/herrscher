@@ -73,6 +73,9 @@ func (r *gatewayRenderer) handle(ctx context.Context, e contracts.Event) {
 				}
 			}
 			if r.pv != nil {
+				if e.Cost > 0 {
+					r.pv.add(contracts.BackendEvent{Kind: "result", Cost: e.Cost})
+				}
 				r.pv.finish(false)
 				r.pv = nil
 			}

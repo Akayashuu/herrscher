@@ -78,13 +78,19 @@ func runOneTurn(ctx context.Context, sink contracts.EventSink, resp contracts.Ba
 		memCtx = orch.Context(ctx)
 	}
 	prompt := contracts.Prompt{Content: ev.Text, Context: memCtx, Author: ev.Who}
-	onEvent := func(be contracts.BackendEvent) { emitBackendEvent(sink, be) }
+	var cost float64
+	onEvent := func(be contracts.BackendEvent) {
+		if be.Kind == "result" {
+			cost = be.Cost
+		}
+		emitBackendEvent(sink, be)
+	}
 	out, err := resp.Respond(ctx, prompt, onEvent)
 	if err != nil && out == "" {
 		out = "⚠️ " + err.Error()
 	}
 	out = strings.TrimSpace(out)
-	sink.Emit(contracts.Event{T: "reply", Text: out, Done: true})
+	sink.Emit(contracts.Event{T: "reply", Text: out, Done: true, Cost: cost})
 	if orch != nil {
 		_ = orch.Observe(ctx, prompt, out)
 	}

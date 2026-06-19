@@ -61,6 +61,25 @@ func TestRendererRecoversToolName(t *testing.T) {
 	}
 }
 
+// Cost ridden in on the terminal reply must land in the collapsed summary, so a
+// non-EventSink gateway shows the turn's USD again (Phase 3 dropped it when the
+// bus stopped carrying the backend result event).
+func TestRendererSummaryShowsCost(t *testing.T) {
+	g := &fanRecorder{}
+	r := newGatewayRenderer(g, g, "c1", "full")
+
+	r.handle(context.Background(), contracts.Event{T: "human", Who: "alice", Text: "hi"})
+	r.handle(context.Background(), contracts.Event{T: "status", Text: "Read main.go"})
+	r.handle(context.Background(), contracts.Event{T: "reply", Text: "done", Done: true, Cost: 0.0042})
+
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	summary := g.statuses[len(g.statuses)-1]
+	if !strings.Contains(summary, "$0.0042") {
+		t.Fatalf("summary dropped the cost: %q", summary)
+	}
+}
+
 // A pending choice the backend couldn't resolve natively is collapsed into the
 // reply text (numbered options); the renderer posts it as plain text. Native
 // select-menu picks over the bus are a documented follow-up.
