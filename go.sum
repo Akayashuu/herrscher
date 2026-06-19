@@ -2,10 +2,10 @@ github.com/Herrscherd/dctl v1.1.0 h1:8CWTzhmv6U0KzZhJ0XrfHmZOn4+ZKMDY9tOLg6P2thQ
 github.com/Herrscherd/dctl v1.1.0/go.mod h1:43yI1s+IzYjP0MPwkkN3rTKrBgXxqA2t7W6bkIjdiPA=
 github.com/Herrscherd/herrscher-claude-backend v0.1.0 h1:gGkOsBycfp3VhShHplqBzDevYbpboIrQ0ibkbzLchPI=
 github.com/Herrscherd/herrscher-claude-backend v0.1.0/go.mod h1:QdlBAD0HUfRbuvHFvJkYQ0JVbxZtZwUj1rwNSsSWS34=
-github.com/Herrscherd/herrscher-contracts v0.1.3 h1:mNfXqsqPJCviZjRMjsaNUCeew9UUY6Gvbt2IJ5Po8E0=
-github.com/Herrscherd/herrscher-contracts v0.1.3/go.mod h1:LM6PwTwJwF4+uVjeqIGFhWZOaQbLPtUxyhjD9ji+NmI=
-github.com/Herrscherd/herrscher-discord-gateway v0.1.0 h1:nx68OQbsCKgltw1PswA6J75KIJCQwNWfDk97AsAIwFM=
-github.com/Herrscherd/herrscher-discord-gateway v0.1.0/go.mod h1:yLHUqt9Sf3rygsm95vU5V4k12Oja7WkUgDGoIe3MgZg=
+github.com/Herrscherd/herrscher-contracts v0.1.4 h1:rJDYGK3bgiEyg8mmEFpZP7ArUnNO98lR+alroPOkRDE=
+github.com/Herrscherd/herrscher-contracts v0.1.4/go.mod h1:LM6PwTwJwF4+uVjeqIGFhWZOaQbLPtUxyhjD9ji+NmI=
+github.com/Herrscherd/herrscher-discord-gateway v0.2.1 h1:v2tFThIsxR9rAReuNZbmNG7gjW0hnNmeGYdHmOJsv+Y=
+github.com/Herrscherd/herrscher-discord-gateway v0.2.1/go.mod h1:e3s3er0ntNO0aq4xFWK0RwMqNLbYvtRuXYq0YwhwOh0=
 github.com/Herrscherd/herrscher-obsidian-memory v0.1.0 h1:iiFhkiypyEDVV63lI9BQ7vAnae4u6E83SQVp5v1IDmg=
 github.com/Herrscherd/herrscher-obsidian-memory v0.1.0/go.mod h1:K+grAZ1y2Of43Gd4A4wEJMUH4qW9kKR3MNXCqWatb1c=
 github.com/Herrscherd/herrscher-orchestrator v0.1.0 h1:CvKY0JC7H2bJB73BNG8ucq1CQxav7YCZH22cOEoaNwo=
@@ -34,6 +34,8 @@ github.com/clipperhouse/stringish v0.1.1 h1:+NSqMOr3GR6k1FdRhhnXrLfztGzuG+VuFDfa
 github.com/clipperhouse/stringish v0.1.1/go.mod h1:v/WhFtE1q0ovMta2+m+UbpZ+2/HEXNWYXQgCt4hdOzA=
 github.com/clipperhouse/uax29/v2 v2.5.0 h1:x7T0T4eTHDONxFJsL94uKNKPHrclyFI0lm7+w94cO8U=
 github.com/clipperhouse/uax29/v2 v2.5.0/go.mod h1:Wn1g7MK6OoeDT0vL+Q0SQLDz/KpfsVRgg6W7ihQeh4g=
+github.com/coder/websocket v1.8.15 h1:6B2JPeOGlpff2Uz6vOEH1Vzpi0iUz20A+lPVhPHtNUA=
+github.com/coder/websocket v1.8.15/go.mod h1:NX3SzP+inril6yawo5CQXx8+fk145lPDC6pumgx0mVg=
 github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f h1:Y/CXytFA4m6baUTXGLOoWe4PQhGxaX0KpnayAqC48p4=
 github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f/go.mod h1:vw97MGsxSvLiUE2X8qFplwetxpGLQrlU1Q9AUEIzCaM=
 github.com/lucasb-eyer/go-colorful v1.3.0 h1:2/yBRLdWBZKrf7gB40FoiKfAWYQ0lqNcbuQwVHXptag=
