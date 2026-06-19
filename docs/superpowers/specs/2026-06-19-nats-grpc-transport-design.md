@@ -119,17 +119,30 @@ puts fan-out / buffering on the bus that's built for it.
 ### e) Failure handling
 
 - Supervisor (reuses the bridge supervisor pattern) restarts a dead child.
-- On restart the child **re-announces**; the proxy reconnects to the new `grpcAddr`.
-- Between death and re-announce the proxy returns a clear, typed error.
-- Liveness reuses `contracts.Liveness`; a NATS disconnect is an additional death signal.
+- While the peer is down, the proxy returns a clear, typed transport error (tested).
 - `contracts.Degrade` already covers absent capabilities, so a missing remote plugin
-  degrades gracefully exactly like a missing local one.
+  degrades gracefully exactly like a missing local one — a memory error disables
+  memory for that bridge rather than crashing it.
+- **MVP limitation (follow-on):** the resolver runs once per bridge process and the
+  proxy is pinned to the address it first dialed. gRPC auto-reconnects only if the
+  restarted child comes back at the **same** address — which today it does not, since
+  `plugin-host` binds an ephemeral `127.0.0.1:0`. So a child restart is not yet
+  auto-recovered within a live bridge. Two clean fixes, deferred to a follow-on:
+  (a) bind `plugin-host` to a stable address so gRPC's built-in reconnect delivers
+  recovery, or (b) keep the resolver's NATS subscription alive and re-dial on a new
+  announcement. Liveness (`contracts.Liveness`) + a NATS-disconnect death signal feed
+  whichever path is chosen.
 
 ## Security
 
 First cut is **localhost-only** (NATS + all plugins on the same host). The threat
 model is deliberately narrow; the multi-machine hardening is a later config flip with
 **no contract or plugin code change**.
+
+Remote mode requires a **NATS server reachable at `$HERRSCHER_NATS`** (default
+`nats://127.0.0.1:4222`); the host and `plugin-host` do not embed one (the embedded
+server is test-only). With no NATS running, `plugin-host` fails to connect and is
+restarted on the supervisor's backoff until one appears.
 
 | Surface | First cut (localhost) | Multi-machine (config flip) |
 |---------|------------------------|------------------------------|
