@@ -12,6 +12,13 @@ import (
 // inbound lines.
 var pollInterval = 50 * time.Millisecond
 
+// hangupT is an internal signal serveConn injects into fromBridge when a
+// bridge connection ends, so awaitTurn abandons the in-flight turn and the FIFO
+// resumes with the next input on reconnect. Its T value is deliberately not a
+// bus event the bridge ever emits, so it cannot be confused with a backend
+// "reset" (which is a mid-turn progress event the turn survives).
+const hangupT = "__hangup"
+
 // sessionDriver owns one session's turn lifecycle: it polls every bound
 // gateway's Reader for inbound messages, serializes them through a FIFO, writes
 // one input frame to the bridge per turn, and fans the bridge's reply events out
@@ -97,7 +104,9 @@ func (d *sessionDriver) pump(ctx context.Context) {
 
 // awaitTurn fans every event for the current turn to all bound gateways and
 // returns when it sees reply{done} (or ctx is cancelled, the bridge closed, or a
-// reset signals the in-flight turn was abandoned on a bridge disconnect).
+// hangup signals the in-flight turn was abandoned on a bridge disconnect). A
+// backend "reset" is a mid-turn progress event: it is fanned out and the turn
+// continues.
 func (d *sessionDriver) awaitTurn(ctx context.Context) {
 	for {
 		select {
@@ -107,8 +116,8 @@ func (d *sessionDriver) awaitTurn(ctx context.Context) {
 			if !ok {
 				return // bridge connection lost; abandon this turn
 			}
-			if e.T == "reset" {
-				return // bridge reset/disconnected mid-turn; abandon it
+			if e.T == hangupT {
+				return // bridge connection ended; abandon this turn
 			}
 			d.fanOut(ctx, e)
 			if e.T == "reply" && e.Done {
@@ -178,7 +187,7 @@ func serveConn(ctx context.Context, conn *control.Conn, toBridge <-chan contract
 	// across reconnects, so a plain channel close can't signal this.
 	defer func() {
 		select {
-		case fromBridge <- contracts.Event{T: "reset"}:
+		case fromBridge <- contracts.Event{T: hangupT}:
 		case <-ctx.Done():
 		}
 	}()

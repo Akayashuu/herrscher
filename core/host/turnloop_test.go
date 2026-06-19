@@ -59,6 +59,16 @@ func (f *fanRecorder) Menu(context.Context, contracts.Conversation, contracts.Me
 	return nil
 }
 
+// sinkRecorder wraps fanRecorder and implements EventSink so the hub fans the
+// full event stream to it via Emit (instead of only posting the final reply).
+type sinkRecorder struct{ fanRecorder }
+
+func (s *sinkRecorder) Emit(e contracts.Event) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.emitted = append(s.emitted, e)
+}
+
 func TestDriverFanOutToAllBoundGateways(t *testing.T) {
 	a := &fanRecorder{}
 	b := &fanRecorder{}
@@ -117,6 +127,55 @@ func TestDriverFIFOSerializesTurns(t *testing.T) {
 		t.Fatalf("second frame %+v pumped before first turn completed", got)
 	case <-time.After(150 * time.Millisecond):
 	}
+	fromBridge <- contracts.Event{T: "reply", Text: "r1", Done: true}
+	if got := <-toBridge; got.Text != "second" {
+		t.Fatalf("second frame = %+v, want second after reply{done}", got)
+	}
+}
+
+// TestDriverResetMidTurnDoesNotEndTurn proves a backend "reset" event mid-turn
+// is fanned out (not swallowed) and does NOT complete the turn: the next queued
+// input must not pump until the real reply{done} arrives.
+func TestDriverResetMidTurnDoesNotEndTurn(t *testing.T) {
+	a := &fanRecorder{}      // input source (non-sink: only final reply posted)
+	rec := &sinkRecorder{}   // EventSink gateway: receives the full stream
+	a.feed("first")
+	a.feed("second")
+
+	toBridge := make(chan contracts.Event, 8)
+	fromBridge := make(chan contracts.Event, 8)
+	d := newSessionDriver("s1",
+		[]contracts.GatewaySet{{Gateway: a, Reader: a}, {Gateway: rec, Reader: rec}},
+		toBridge, fromBridge)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go d.run(ctx)
+
+	// First input pumped.
+	if got := <-toBridge; got.Text != "first" {
+		t.Fatalf("first frame = %+v", got)
+	}
+
+	// Mid-turn backend reset followed by a chunk, then the real reply{done}.
+	fromBridge <- contracts.Event{T: "reset"}
+	fromBridge <- contracts.Event{T: "chunk", Text: "x"}
+
+	// The reset+chunk must be fanned to the EventSink gateway before the reply,
+	// and the second input must NOT have pumped yet (turn still alive).
+	waitFor(t, func() bool {
+		rec.mu.Lock()
+		defer rec.mu.Unlock()
+		return len(rec.emitted) == 2 &&
+			rec.emitted[0].T == "reset" && rec.emitted[1].T == "chunk"
+	}, "reset and chunk fanned to EventSink before reply")
+
+	select {
+	case got := <-toBridge:
+		t.Fatalf("second frame %+v pumped before reply{done}: reset ended the turn", got)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	// Now complete the turn.
 	fromBridge <- contracts.Event{T: "reply", Text: "r1", Done: true}
 	if got := <-toBridge; got.Text != "second" {
 		t.Fatalf("second frame = %+v, want second after reply{done}", got)
