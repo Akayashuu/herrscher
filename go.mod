@@ -11,3 +11,5 @@ require (
 )
 
 require github.com/Herrscherd/dctl v1.1.0 // indirect
+
+replace github.com/Herrscherd/herrscher-contracts => /home/shan/dev/herrscher-contracts

@@ -67,11 +67,11 @@ type runner struct {
 	ch   string
 	o    Options
 	seen map[string]bool
-	sink EventSink
+	sink contracts.EventSink
 }
 
 // emit forwards e to the sink when one is configured; a nil sink is a no-op.
-func (r *runner) emit(e control.Event) {
+func (r *runner) emit(e contracts.Event) {
 	if r.sink != nil {
 		r.sink.Emit(e)
 	}
@@ -84,13 +84,13 @@ func (r *runner) emit(e control.Event) {
 func (r *runner) emitBackend(ev contracts.BackendEvent) {
 	switch ev.Kind {
 	case "text":
-		r.emit(control.Event{T: "chunk", Text: ev.Detail})
+		r.emit(contracts.Event{T: "chunk", Text: ev.Detail})
 	case "tool":
 		if text := strings.TrimSpace(ev.Tool + " " + ev.Detail); text != "" {
-			r.emit(control.Event{T: "status", Text: text})
+			r.emit(contracts.Event{T: "status", Text: text})
 		}
 	case "reset":
-		r.emit(control.Event{T: "reset"})
+		r.emit(contracts.Event{T: "reset"})
 	}
 }
 
@@ -106,7 +106,7 @@ func (r *runner) handle(ctx context.Context, m contracts.Message) {
 		recordParticipant(r.o.Participants, m.AuthorID)
 	}
 	logf(r.o.Verbose, "<%s> %s", m.AuthorName, oneline(m.Content))
-	r.emit(control.Event{T: "human", Who: m.AuthorName, Text: m.Content})
+	r.emit(contracts.Event{T: "human", Who: m.AuthorName, Text: m.Content})
 
 	// Pull any image attachments down to local files so the backend can
 	// reference them. Best-effort: a download failure never drops a turn.
@@ -164,11 +164,11 @@ func (r *runner) handle(ctx context.Context, m contracts.Message) {
 		}
 		_ = r.p.Unreact(ctx, r.ch, m.ID, ackEmoji)
 		_ = r.gw.React(ctx, r.conv, contracts.MessageID(m.ID), failEmoji)
-		r.emit(control.Event{T: "reply", Done: true})
+		r.emit(contracts.Event{T: "reply", Done: true})
 		return
 	}
 	postResult(ctx, r.p, r.gw, r.conv, m.ID, out, r.resp, r.o)
-	r.emit(control.Event{T: "reply", Text: out, Done: true})
+	r.emit(contracts.Event{T: "reply", Text: out, Done: true})
 	if r.orch != nil {
 		if rerr := r.orch.Observe(ctx, prompt, out); rerr != nil {
 			logf(r.o.Verbose, "memory record error: %v", rerr) // best-effort: never break the loop
@@ -182,18 +182,11 @@ func (r *runner) handle(ctx context.Context, m contracts.Message) {
 	_ = r.gw.React(ctx, r.conv, contracts.MessageID(m.ID), doneEmoji)
 }
 
-// EventSink receives structured turn events for an out-of-band consumer (the
-// TUI hub, in a later phase). Discord posting is independent of the sink; a nil
-// sink simply disables emission, so the bridge behaves exactly as before.
-type EventSink interface {
-	Emit(control.Event)
-}
-
 // Run links the channel to the backend until ctx is cancelled. newBackend builds
 // the model edge for the resolved channel, keeping core model-agnostic. orch is
 // the optional Orchestrator port (nil when none is wired): when present it primes
 // each turn with recalled background and records the turn afterwards.
-func Run(ctx context.Context, p contracts.ChannelReader, gw contracts.Gateway, newBackend BackendFactory, orch contracts.Orchestrator, sink EventSink, o Options) error {
+func Run(ctx context.Context, p contracts.ChannelReader, gw contracts.Gateway, newBackend BackendFactory, orch contracts.Orchestrator, sink contracts.EventSink, o Options) error {
 	if !p.Enabled() {
 		return ErrDisabled
 	}

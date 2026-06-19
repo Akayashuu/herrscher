@@ -5,13 +5,12 @@ import (
 	"testing"
 
 	contracts "github.com/Herrscherd/herrscher-contracts"
-	"github.com/Herrscherd/herrscher/core/internal/control"
 )
 
 // fakeSink collects emitted events in order.
-type fakeSink struct{ events []control.Event }
+type fakeSink struct{ events []contracts.Event }
 
-func (s *fakeSink) Emit(e control.Event) { s.events = append(s.events, e) }
+func (s *fakeSink) Emit(e contracts.Event) { s.events = append(s.events, e) }
 
 // fakeBackend emits one text event then returns a fixed reply.
 type fakeBackend struct{ reply string }
@@ -85,7 +84,7 @@ func TestHandleEmitsTurnEvents(t *testing.T) {
 	if len(gw.posts) != 1 || gw.posts[0] != "done · 4 files changed" {
 		t.Fatalf("gateway posts = %v, want one reply", gw.posts)
 	}
-	want := []control.Event{
+	want := []contracts.Event{
 		{T: "human", Who: "alice", Text: "refactor the env loader"},
 		{T: "chunk", Text: "thinking"},
 		{T: "reply", Text: "done · 4 files changed", Done: true},
@@ -104,10 +103,10 @@ func TestEmitBackendMapping(t *testing.T) {
 	cases := []struct {
 		name string
 		ev   contracts.BackendEvent
-		want []control.Event
+		want []contracts.Event
 	}{
-		{"tool", contracts.BackendEvent{Kind: "tool", Tool: "Edit", Detail: "file.go"}, []control.Event{{T: "status", Text: "Edit file.go"}}},
-		{"reset", contracts.BackendEvent{Kind: "reset"}, []control.Event{{T: "reset"}}},
+		{"tool", contracts.BackendEvent{Kind: "tool", Tool: "Edit", Detail: "file.go"}, []contracts.Event{{T: "status", Text: "Edit file.go"}}},
+		{"reset", contracts.BackendEvent{Kind: "reset"}, []contracts.Event{{T: "reset"}}},
 		{"result drops", contracts.BackendEvent{Kind: "result", Detail: "ignored"}, nil},
 		{"empty tool drops", contracts.BackendEvent{Kind: "tool"}, nil},
 	}
