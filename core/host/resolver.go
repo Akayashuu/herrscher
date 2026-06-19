@@ -15,7 +15,7 @@ import (
 // remote set every category resolves local — today's behaviour.
 type Resolver struct {
 	remote  map[contracts.Category]bool
-	NatsURL string // "" => nats.DefaultURL; consulted only on the remote path (Task 8)
+	NatsURL string // "" => nats.DefaultURL; consulted only on the remote path
 }
 
 func NewResolver(remote map[contracts.Category]bool, natsURL string) *Resolver {

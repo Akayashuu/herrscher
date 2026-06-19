@@ -108,10 +108,12 @@ which fail the build if a concrete client ever leaks in.
 ## The plugin model — four categories
 
 Plugins are compiled **into** the single binary (the [xcaddy] pattern): you add a
-blank import and rebuild — no dynamic loading, no separate processes. Each plugin
-self-registers into the global `contracts.Default` registry from its `init()`,
-before any token or runtime config exists. The host then asks the registry for
-what it needs at startup and instantiates it with live config.
+blank import and rebuild — no dynamic loading. Each plugin self-registers into the
+global `contracts.Default` registry from its `init()`, before any token or runtime
+config exists. The host then asks the registry for what it needs at startup and
+instantiates it with live config. They run **in-process by default**; a category
+can opt into running as a **separate process** over the NATS/gRPC transport (see
+[Roadmap](#roadmap)) with no plugin code change.
 
 [xcaddy]: https://github.com/caddyserver/xcaddy
 
@@ -442,6 +444,9 @@ Common ones: `DISCORD_BOT_TOKEN`, `DISCORD_CHANNEL_ID` (default channel),
 `DCTL_OWNER_ID` (seed allowlist), `DCTL_STATE_DIR` (state dir, default
 `~/.config/dctl`), `DCTL_INSTANCE_ID` (namespace slug for shared resources). All
 of these can be supplied via the root `.env` (see [Configuration](#configuration)).
+Remote transport (opt-in, see [Roadmap](#roadmap)): `HERRSCHER_REMOTE` —
+comma-separated categories to run out-of-process (e.g. `memory`; unset ⇒ all
+in-process) — and `HERRSCHER_NATS` — the NATS URL (default `nats://127.0.0.1:4222`).
 
 ---
 
@@ -582,9 +587,13 @@ plugin (the Discord gateway needs `DISCORD_BOT_TOKEN`).
 
 - **More catalog kinds** — additional gateway/backend/memory/orchestrator modules
   in the `herrscher init` catalog beyond the current defaults.
-- **Distributed transport** — the in-process registry (`Manifest`, factories) is
-  shaped so the channel/model/domain split can later run over **NATS/gRPC** as a
-  wiring change, not a rewrite.
+- **Distributed transport** — first cut landed: a plugin **category can run as a
+  separate process** over NATS (discovery) + gRPC (port calls), opt-in via
+  `HERRSCHER_REMOTE` with `memory` carried first; in-process stays the default. The
+  wire lives in the separate `herrscher-transport` module, and remote mode needs a
+  NATS server at `$HERRSCHER_NATS`. Still ahead: the other categories, streaming
+  events over NATS, and the multi-machine flip (mTLS + creds) — all config, no
+  contract change.
 
 ---
 
