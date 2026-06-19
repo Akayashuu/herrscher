@@ -5,6 +5,7 @@ import (
 	"time"
 
 	contracts "github.com/Herrscherd/herrscher-contracts"
+	control "github.com/Herrscherd/herrscher/core/internal/control"
 )
 
 // pollInterval is how often the driver polls each bound gateway's Read for new
@@ -140,4 +141,71 @@ func gatewayChannel(g contracts.GatewaySet) string {
 		return g.Reader.DefaultChannel()
 	}
 	return ""
+}
+
+// RunSession drives one session against a control Acceptor: it bridges the
+// persistent Conn (input frames out, event frames in) to a sessionDriver, and
+// re-binds to a fresh Conn whenever the bridge reconnects (after a crash +
+// supervisor restart). It blocks until ctx is cancelled.
+func RunSession(ctx context.Context, name string, gws []contracts.GatewaySet, acc *control.Acceptor) {
+	toBridge := make(chan contracts.Event)
+	fromBridge := make(chan contracts.Event)
+	d := newSessionDriver(name, gws, toBridge, fromBridge)
+	go d.run(ctx)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case conn, ok := <-acc.Conns():
+			if !ok {
+				return
+			}
+			serveConn(ctx, conn, toBridge, fromBridge)
+		}
+	}
+}
+
+// serveConn shuttles frames between the driver and one bridge connection until
+// the connection closes or ctx is cancelled. The reader goroutine forwards the
+// bridge's events into fromBridge; the writer drains toBridge to the conn.
+func serveConn(ctx context.Context, conn *control.Conn, toBridge <-chan contracts.Event, fromBridge chan<- contracts.Event) {
+	cctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	defer conn.Close()
+	// When this connection ends, tell the driver to abandon any in-flight turn so
+	// the next queued input flows to the reconnecting bridge. fromBridge persists
+	// across reconnects, so a plain channel close can't signal this.
+	defer func() {
+		select {
+		case fromBridge <- contracts.Event{T: "reset"}:
+		case <-ctx.Done():
+		}
+	}()
+
+	go func() {
+		_ = conn.Scan(func(e contracts.Event) error {
+			select {
+			case fromBridge <- e:
+				return nil
+			case <-cctx.Done():
+				return cctx.Err()
+			}
+		})
+		cancel() // connection closed → unblock the writer and return to re-accept
+	}()
+
+	for {
+		select {
+		case <-cctx.Done():
+			return
+		case ev := <-toBridge:
+			if cctx.Err() != nil {
+				return // connection already dead; don't write into a dying conn
+			}
+			if err := conn.Write(ev); err != nil {
+				return // write failed → connection dead, go re-accept
+			}
+		}
+	}
 }

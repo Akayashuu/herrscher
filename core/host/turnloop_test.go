@@ -2,11 +2,13 @@ package host
 
 import (
 	"context"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
 	contracts "github.com/Herrscherd/herrscher-contracts"
+	control "github.com/Herrscherd/herrscher/core/internal/control"
 )
 
 // fanRecorder is a gateway+reader+sink that records what the hub fans to it and
@@ -132,3 +134,70 @@ func waitFor(t *testing.T, cond func() bool, what string) {
 	}
 	t.Fatalf("timed out waiting for: %s", what)
 }
+
+func TestRunSessionReconnectsAndResumes(t *testing.T) {
+	a := &fanRecorder{}
+	a.feed("q1")
+	sock := tmpSock(t)
+	acc, err := acceptCtl(sock)
+	if err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	defer acc.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go RunSession(ctx, "s1", []contracts.GatewaySet{{Gateway: a, Reader: a}}, acc)
+
+	// First bridge connects, gets the input, then dies before replying.
+	c1 := dialCtl(t, sock)
+	gotInput(t, c1, "q1")
+	c1.Close()
+
+	// A new bridge connects (supervisor restart). The driver should resume and
+	// the next queued input flows. Feed a second line and expect it.
+	a.feed("q2")
+	c2 := dialCtl(t, sock)
+	defer c2.Close()
+	gotInput(t, c2, "q2")
+}
+
+func tmpSock(t *testing.T) string { t.Helper(); return filepath.Join(t.TempDir(), "h.sock") }
+func acceptCtl(sock string) (*control.Acceptor, error) { return control.Accept(sock) }
+func dialCtl(t *testing.T, sock string) *control.Conn {
+	t.Helper()
+	c, err := control.Dial(sock)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	return c
+}
+
+// gotInput scans c for the first "input" frame and asserts its Text within 1s.
+func gotInput(t *testing.T, c *control.Conn, want string) {
+	t.Helper()
+	got := make(chan string, 1)
+	go func() {
+		_ = c.Scan(func(e contracts.Event) error {
+			if e.T == "input" {
+				got <- e.Text
+				return errStopScan
+			}
+			return nil
+		})
+	}()
+	select {
+	case g := <-got:
+		if g != want {
+			t.Fatalf("input = %q, want %q", g, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for input %q", want)
+	}
+}
+
+var errStopScan = stopScanErr{}
+
+type stopScanErr struct{}
+
+func (stopScanErr) Error() string { return "stop" }
