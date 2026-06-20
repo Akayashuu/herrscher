@@ -25,6 +25,8 @@ func runBridge(ctx context.Context, args []string) error {
 	stream := fs.Bool("stream", true, "legacy: only consulted when --backend is unset; --stream=false selects the one-shot backend")
 	model := fs.String("model", "", "model for the persistent claude session (e.g. claude-haiku-4-5-20251001)")
 	session := fs.String("session", "", "session name (scopes the orchestrator/attachment dir)")
+	project := fs.String("project", "", "project name — the shared memory scope (P1: every agent of this game recalls it)")
+	agent := fs.String("agent", "", "agent name — the private memory scope (P1: this agent's learned skills)")
 	verbose := fs.Bool("v", false, "log activity to stderr")
 	backend := fs.String("backend", "", "responder backend: stream (default) | oneshot")
 	hubSocket := fs.String("hub-socket", "", "unix socket of the daemon hub: when set, run as a pure backend runner (no gateway polling)")
@@ -47,7 +49,7 @@ func runBridge(ctx context.Context, args []string) error {
 	if mem != nil {
 		defer mem.Close()
 	}
-	orch := buildOrchestrator(ctx, mem, *session, *verbose)
+	orch := buildOrchestrator(ctx, mem, *session, *project, *agent, *verbose)
 	if orch != nil {
 		defer orch.Close()
 	}
@@ -81,7 +83,7 @@ func buildMemory(ctx context.Context, verbose bool) contracts.Memory {
 // The session name is threaded through the config bag (key "session") since it is
 // runtime state, not env config. A config/instantiation failure disables it
 // (logged) rather than blocking the bridge.
-func buildOrchestrator(ctx context.Context, mem contracts.Memory, session string, verbose bool) contracts.Orchestrator {
+func buildOrchestrator(ctx context.Context, mem contracts.Memory, session, project, agent string, verbose bool) contracts.Orchestrator {
 	disabled := func(kind string, err error) contracts.Orchestrator {
 		if verbose {
 			fmt.Fprintf(os.Stderr, "herrscher bridge: orchestrator %q disabled: %v\n", kind, err)
@@ -99,7 +101,15 @@ func buildOrchestrator(ctx context.Context, mem contracts.Memory, session string
 		if cfg.Settings == nil {
 			cfg.Settings = map[string]string{}
 		}
+		// Runtime state threaded through the config bag: the session scopes the
+		// rolling transcript; project/agent scope the shared/private memory (P1).
 		cfg.Settings["session"] = session
+		if project != "" {
+			cfg.Settings["memory.project"] = project
+		}
+		if agent != "" {
+			cfg.Settings["memory.agent"] = agent
+		}
 		orch, err := p.Orchestrator(ctx, cfg, mem)
 		if err != nil {
 			return disabled(p.Manifest.Kind, err)

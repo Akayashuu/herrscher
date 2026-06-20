@@ -24,6 +24,14 @@ type Supervisor struct {
 func (s *Supervisor) bridgeArgs(sess state.Session) []string {
 	args := []string{"bridge", "-c", sess.ChannelID, "--cmd", sess.Cmd, "--session", sess.Name,
 		"--hub-socket", control.SocketPath(sess.Name)}
+	// P1: thread the session's memory scope so the orchestrator recalls the
+	// game's shared memory and this agent's private skills each turn.
+	if sess.Project != "" {
+		args = append(args, "--project", sess.Project)
+	}
+	if sess.Agent != "" {
+		args = append(args, "--agent", sess.Agent)
+	}
 	if sess.Backend != "" && sess.Backend != "stream" {
 		args = append(args, "--backend", sess.Backend)
 	}

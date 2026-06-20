@@ -32,6 +32,7 @@ guarded by purity tests (`TestHostPurity`, `TestCorePurity`).
 - [The two run modes](#the-two-run-modes)
 - [Session lifecycle](#session-lifecycle)
 - [Durable agents](#durable-agents)
+  - [Memory scope (shared vs private)](#memory-scope-shared-vs-private)
 - [Installation](#installation)
 - [CLI reference](#cli-reference)
 - [Managing plugins](#managing-plugins-the-init--plugin--update--install-verbs)
@@ -371,6 +372,22 @@ Because the materialized files live inside the disposable worktree, an agent
 companion always needs an **isolated git worktree**: `--agent` is rejected with
 `shared:true` or a non-git project.
 
+### Memory scope (shared vs private)
+
+A session carries a **project** and (optionally) an **agent**, and the supervisor
+threads both to the bridge as `--project` / `--agent`. The orchestrator turns them
+into a memory scope (P1): the **project** is the shared root — durable memory every
+agent of that game recalls (decisions, conventions, the studio tree) — and the
+**agent** is the private root for that companion's learned skills. Each turn the
+orchestrator prepends the shared project memory and this agent's private skills
+before the rolling session transcript.
+
+Both are optional and backward-compatible: with no project the bridge omits the
+flags and the orchestrator falls back to transcript-only continuity. The policy
+itself lives in [herrscher-contracts](https://github.com/Herrscherd/herrscher-contracts)
+(`MemoryScope`) and is applied by
+[herrscher-orchestrator](https://github.com/Herrscherd/herrscher-orchestrator).
+
 ---
 
 ## Installation
@@ -481,7 +498,7 @@ gateway plugin alone.
 | Command | What it does |
 |---------|--------------|
 | `serve [--config PATH] [--state FILE] [--health-addr ADDR] [--status-channel ID] [--env-file PATH] [--instance SLUG] [--cmd '…']` | The always-on Gateway daemon: per-session bridge supervision, health endpoint. |
-| `bridge -c CHANNEL --hub-socket SOCK [--cmd '…'] [--backend stream\|oneshot] [--model M] [--session N] …` | One pure-runner backend over the daemon's control socket. Normally spawned by `serve`. |
+| `bridge -c CHANNEL --hub-socket SOCK [--cmd '…'] [--backend stream\|oneshot] [--model M] [--session N] [--project P] [--agent A] …` | One pure-runner backend over the daemon's control socket. Normally spawned by `serve`. `--project`/`--agent` set the [memory scope](#memory-scope-shared-vs-private) (the supervisor threads them from the session's own project/agent). |
 | `session <create\|close\|list\|who> [--name N] [--project P] [--clone R] [--cmd '…'] [--backend stream\|oneshot] [--shared] [--agent NAME] [--force]` | Manage sessions: create a bridged channel + worktree + backend (optionally provisioned from a durable [agent](#durable-agents)), close one, or list/inspect active ones. |
 | `agent <create\|list> [--name N] [--soul '…'] [--mcp '…']` | Manage durable companion [agents](#durable-agents): a home with persona + MCP + zero-prompt settings, materialized into a session worktree via `session create --agent`. |
 | `service <install\|uninstall\|status\|restart\|update> [--cmd '…'] [--health-addr ADDR] [--env-file PATH] [--source DIR] [--no-pull]` | Manage the daemon as a native OS service (see [Installation](#installation)). |
