@@ -4,10 +4,10 @@ go 1.25.0
 
 require (
 	github.com/Herrscherd/herrscher-claude-backend v0.1.1
-	github.com/Herrscherd/herrscher-contracts v0.1.4
+	github.com/Herrscherd/herrscher-contracts v0.1.5-0.20260620002133-7d1da5b3d1eb
 	github.com/Herrscherd/herrscher-discord-gateway v0.2.1
 	github.com/Herrscherd/herrscher-obsidian-memory v0.1.1
-	github.com/Herrscherd/herrscher-orchestrator v0.1.1
+	github.com/Herrscherd/herrscher-orchestrator v0.1.2-0.20260620004517-2ab2ed90f2f3
 	github.com/Herrscherd/herrscher-transport v0.1.1
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
