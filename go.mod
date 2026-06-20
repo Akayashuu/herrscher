@@ -7,7 +7,7 @@ require (
 	github.com/Herrscherd/herrscher-contracts v0.1.5
 	github.com/Herrscherd/herrscher-discord-gateway v0.2.1
 	github.com/Herrscherd/herrscher-obsidian-memory v0.1.1
-	github.com/Herrscherd/herrscher-orchestrator v0.1.2
+	github.com/Herrscherd/herrscher-orchestrator v0.1.3
 	github.com/Herrscherd/herrscher-transport v0.1.1
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
