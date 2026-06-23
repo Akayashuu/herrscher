@@ -232,10 +232,6 @@ func RunHub(ctx context.Context, gws []Deps, o Options) error {
 	return ctx.Err()
 }
 
-// remoteHostRestartDelay is the fixed pause before a crashed remote plugin-host
-// is restarted. (Stage A2 replaces it with exponential backoff + jitter.)
-const remoteHostRestartDelay = 3 * time.Second
-
 func startRemotePluginHosts(ctx context.Context, self string, remote map[contracts.Category]bool, log *slog.Logger) {
 	log = log.With("component", "plugin-host", "category", "memory")
 	for c := range remote {
@@ -247,6 +243,7 @@ func startRemotePluginHosts(ctx context.Context, self string, remote map[contrac
 		return
 	}
 	go func() {
+		bo := obs.RestartBackoff()
 		for ctx.Err() == nil {
 			cmd := exec.CommandContext(ctx, self, "plugin-host", "--category", "memory", "--instance", "memory-0")
 			if url := os.Getenv("HERRSCHER_NATS"); url != "" {
@@ -254,15 +251,17 @@ func startRemotePluginHosts(ctx context.Context, self string, remote map[contrac
 			}
 			cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
 			cmd.Env = os.Environ()
+			start := time.Now()
 			_ = cmd.Run()
 			if ctx.Err() != nil {
 				return
 			}
-			log.Warn("memory plugin-host exited, restarting", "delay", remoteHostRestartDelay)
+			delay := bo.Next(time.Since(start))
+			log.Warn("memory plugin-host exited, restarting", "delay", delay)
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(remoteHostRestartDelay):
+			case <-time.After(delay):
 			}
 		}
 	}()

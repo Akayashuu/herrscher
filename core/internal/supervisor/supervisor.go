@@ -13,10 +13,6 @@ import (
 	"github.com/Herrscherd/herrscher/core/internal/state"
 )
 
-// restartDelay is the fixed pause before a crashed bridge is restarted. (Stage
-// A2 replaces it with exponential backoff + jitter.)
-const restartDelay = 3 * time.Second
-
 // Supervisor manages one child `herrscher bridge` process per session.
 type Supervisor struct {
 	ctx     context.Context
@@ -24,9 +20,10 @@ type Supervisor struct {
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc
 	log     *slog.Logger
-	// sleep is the restart-backoff timer seam; defaults to time.After so tests
-	// can drive the restart loop without real wall-clock waits.
+	// sleep and now are clock seams (default time.After / time.Now) so tests can
+	// drive the restart loop and its backoff without real wall-clock waits.
 	sleep func(time.Duration) <-chan time.Time
+	now   func() time.Time
 }
 
 // bridgeArgs builds the child `herrscher bridge` argv for sess.
@@ -56,6 +53,7 @@ func NewSupervisor(ctx context.Context, selfBin string) *Supervisor {
 		cancels: map[string]context.CancelFunc{},
 		log:     obs.NewLogger(os.Stderr, slog.LevelInfo),
 		sleep:   time.After,
+		now:     time.Now,
 	}
 }
 
@@ -90,6 +88,7 @@ func (s *Supervisor) Stop(name string) error {
 }
 
 func (s *Supervisor) runLoop(ctx context.Context, sess state.Session) {
+	bo := obs.RestartBackoff()
 	for {
 		if ctx.Err() != nil {
 			return
@@ -100,15 +99,17 @@ func (s *Supervisor) runLoop(ctx context.Context, sess state.Session) {
 		}
 		cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
 		cmd.Env = os.Environ()
+		start := s.now()
 		_ = cmd.Run() // returns on exit or ctx cancel
 		if ctx.Err() != nil {
 			return
 		}
-		s.log.Warn("bridge exited, restarting", "session", sess.Name, "delay", restartDelay)
+		delay := bo.Next(s.now().Sub(start))
+		s.log.Warn("bridge exited, restarting", "session", sess.Name, "delay", delay)
 		select {
 		case <-ctx.Done():
 			return
-		case <-s.sleep(restartDelay):
+		case <-s.sleep(delay):
 		}
 	}
 }

@@ -3,6 +3,7 @@ package supervisor
 import (
 	"bytes"
 	"context"
+	"io"
 	"log/slog"
 	"strings"
 	"testing"
@@ -86,6 +87,66 @@ func TestRunLoopLogsRestartAsStructuredWarn(t *testing.T) {
 	}
 	if !strings.Contains(out, "session=demo") {
 		t.Fatalf("expected a session field on the restart record, got %q", out)
+	}
+}
+
+// captureDelays runs runLoop against a never-starting binary, recording the
+// delay handed to each restart and cancelling after wantN restarts. now controls
+// the per-attempt clock so the test fixes how long each attempt "ran".
+func captureDelays(t *testing.T, wantN int, now func() time.Time) []time.Duration {
+	t.Helper()
+	var delays []time.Duration
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := NewSupervisor(ctx, "/herrscher/does-not-exist")
+	s.SetLogger(obs.NewLogger(io.Discard, slog.LevelInfo))
+	s.now = now
+	s.sleep = func(d time.Duration) <-chan time.Time {
+		delays = append(delays, d)
+		if len(delays) >= wantN {
+			cancel()
+		}
+		ch := make(chan time.Time, 1)
+		ch <- time.Time{}
+		return ch
+	}
+	s.runLoop(ctx, state.Session{Name: "demo"})
+	return delays
+}
+
+// TestRunLoopBacksOffGeometrically asserts a tight crash loop (each attempt
+// reports ~0 runtime via the frozen clock) produces strictly growing delays.
+func TestRunLoopBacksOffGeometrically(t *testing.T) {
+	frozen := time.Unix(0, 0)
+	delays := captureDelays(t, 4, func() time.Time { return frozen })
+	if len(delays) < 4 {
+		t.Fatalf("expected at least 4 restart delays, got %v", delays)
+	}
+	pol := obs.RestartBackoff()
+	for i := 1; i < len(delays); i++ {
+		if delays[i-1] < pol.Max && delays[i] <= delays[i-1] {
+			t.Fatalf("delay did not grow at %d: %v", i, delays)
+		}
+	}
+}
+
+// TestRunLoopResetsBackoffAfterHealthyRun asserts that when each attempt runs
+// longer than resetAfter, the streak resets every time so the delay stays at
+// base — proving the measured runtime feeds the backoff (not a constant 0).
+func TestRunLoopResetsBackoffAfterHealthyRun(t *testing.T) {
+	pol := obs.RestartBackoff()
+	tick := time.Unix(0, 0)
+	// Each now() call advances past the reset threshold, so start→end of every
+	// attempt exceeds it.
+	delays := captureDelays(t, 3, func() time.Time {
+		tick = tick.Add(2 * pol.Reset)
+		return tick
+	})
+	floor := time.Duration(float64(pol.Base) * (1 - pol.Jitter))
+	for i, d := range delays {
+		if d < floor || d > pol.Base {
+			t.Fatalf("delay %d = %v, want within [%v, %v] (reset to base each time)", i, d, floor, pol.Base)
+		}
 	}
 }
 
