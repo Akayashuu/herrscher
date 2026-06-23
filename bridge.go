@@ -70,6 +70,7 @@ func buildMemory(ctx context.Context, log *slog.Logger) contracts.Memory {
 		return nil
 	}
 	r := host.NewResolver(remoteCategories(), os.Getenv("HERRSCHER_NATS"))
+	r.SetLogger(log)
 	mem, err := r.Memory(ctx, contracts.Default.Memories(), os.Getenv)
 	if err != nil {
 		return disabled("memory", err)

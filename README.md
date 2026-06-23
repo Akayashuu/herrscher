@@ -662,7 +662,9 @@ plugin (the Discord gateway needs `DISCORD_BOT_TOKEN`).
   separate process** over NATS (discovery) + gRPC (port calls), opt-in via
   `HERRSCHER_REMOTE` with `memory` carried first; in-process stays the default. The
   wire lives in the separate `herrscher-transport` module, and remote mode needs a
-  NATS server at `$HERRSCHER_NATS`. Still ahead: the other categories, streaming
+  NATS server at `$HERRSCHER_NATS`. Remote resolves are bounded by a per-attempt
+  timeout and retried on backoff within a total deadline (in-process stays
+  immediate). Still ahead: the other categories, streaming
   events over NATS, and the multi-machine flip (mTLS + creds) — all config, no
   contract change.
 
