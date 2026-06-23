@@ -21,7 +21,7 @@ func TestHubDispatchSetSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := newHub(ctx, st, sup, nil, t.TempDir(), reg)
+	h := newHub(ctx, st, sup, nil, t.TempDir(), reg, nil)
 
 	if _, err := h.Dispatch(ctx, []string{"set", "source", "--path", "/src/x"}); err != nil {
 		t.Fatal(err)
@@ -37,7 +37,7 @@ func newTestHub(t *testing.T) *hub {
 	t.Cleanup(cancel)
 	st := state.NewState(t.TempDir() + "/s.json")
 	sup := supervisor.NewSupervisor(ctx, "/nonexistent/herrscher") // never Start()ed in these tests
-	return newHub(ctx, st, sup, nil, t.TempDir(), &cli.Registry{})
+	return newHub(ctx, st, sup, nil, t.TempDir(), &cli.Registry{}, nil)
 }
 
 // Sessions mirrors persisted state as neutral SessionInfo for gateways.

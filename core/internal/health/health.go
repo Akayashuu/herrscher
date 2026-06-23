@@ -3,6 +3,8 @@ package health
 import (
 	"sync"
 	"time"
+
+	"github.com/Herrscherd/herrscher/core/internal/metrics"
 )
 
 // Health is the daemon's in-memory liveness state. Thread-safe. Driven only by
@@ -15,20 +17,28 @@ type Health struct {
 	lastPing      time.Time
 	pingLatencyMS int64
 	sessions      int
+	metrics       *metrics.Registry
 }
 
 // HealthSnapshot is an immutable view rendered for /health and the status embed.
 type HealthSnapshot struct {
-	Online        bool   `json:"online"`
-	UptimeS       int64  `json:"uptime_s"`
-	PingMS        int64  `json:"ping_ms"`
-	Sessions      int    `json:"sessions"`
-	LastHeartbeat string `json:"last_heartbeat"`
-	LastPing      string `json:"last_ping"`
+	Online        bool             `json:"online"`
+	UptimeS       int64            `json:"uptime_s"`
+	PingMS        int64            `json:"ping_ms"`
+	Sessions      int              `json:"sessions"`
+	LastHeartbeat string           `json:"last_heartbeat"`
+	LastPing      string           `json:"last_ping"`
+	Metrics       metrics.Snapshot `json:"metrics"`
 }
 
-// NewHealth starts a Health clock at startedAt.
-func NewHealth(startedAt time.Time) *Health { return &Health{startedAt: startedAt} }
+// NewHealth starts a Health clock at startedAt with a fresh metrics registry.
+func NewHealth(startedAt time.Time) *Health {
+	return &Health{startedAt: startedAt, metrics: metrics.NewRegistry()}
+}
+
+// Metrics returns the runtime metrics registry surfaced on every snapshot, so
+// the supervisor and turn loop can record into the same registry health reports.
+func (h *Health) Metrics() *metrics.Registry { return h.metrics }
 
 // HeartbeatAck records a gateway heartbeat ACK at t.
 func (h *Health) HeartbeatAck(t time.Time) {
@@ -64,6 +74,7 @@ func (h *Health) Snapshot(now time.Time, window time.Duration) HealthSnapshot {
 		Sessions:      h.sessions,
 		LastHeartbeat: stamp(h.lastHeartbeat),
 		LastPing:      stamp(h.lastPing),
+		Metrics:       h.metrics.Snapshot(),
 	}
 }
 

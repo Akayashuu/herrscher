@@ -10,6 +10,7 @@ import (
 	"time"
 
 	contracts "github.com/Herrscherd/herrscher-contracts"
+	"github.com/Herrscherd/herrscher/core/internal/health"
 	"github.com/Herrscherd/herrscher/core/internal/obs"
 )
 
@@ -109,6 +110,33 @@ func TestRemoteResolveStopsAtBudget(t *testing.T) {
 	}
 	if calls >= r.retryAttempts {
 		t.Fatalf("budget should stop retries well before the attempt cap, got %d calls", calls)
+	}
+}
+
+// TestRemoteResolveRecordsMetricsOnHealth wires the resolver into the same
+// registry the health surface reports, so a failed remote resolve is visible on
+// the health snapshot (attempts, one failure, and a latency sample).
+func TestRemoteResolveRecordsMetricsOnHealth(t *testing.T) {
+	h := health.NewHealth(time.Unix(0, 0))
+	r := NewResolver(map[contracts.Category]bool{contracts.CategoryMemory: true}, "")
+	r.SetMetrics(h.Metrics())
+	frozen := time.Unix(0, 0)
+	fastClock(r, func() time.Time { return frozen })
+	r.dialMemory = func(context.Context, contracts.Plugin) (contracts.Memory, error) {
+		return nil, context.DeadlineExceeded
+	}
+
+	_, _ = r.Memory(context.Background(), remotePlugin(), func(string) string { return "" })
+
+	m := h.Snapshot(time.Unix(1, 0), 30*time.Second).Metrics
+	if m.RemoteAttempts != int64(r.retryAttempts) {
+		t.Fatalf("remote attempts = %d, want %d", m.RemoteAttempts, r.retryAttempts)
+	}
+	if m.RemoteFailures != 1 {
+		t.Fatalf("remote failures = %d, want 1", m.RemoteFailures)
+	}
+	if m.RemoteLatency.Count < 1 {
+		t.Fatalf("expected at least one remote latency sample, got %d", m.RemoteLatency.Count)
 	}
 }
 

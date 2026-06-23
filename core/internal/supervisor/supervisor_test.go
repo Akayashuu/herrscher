@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Herrscherd/herrscher/core/internal/metrics"
 	"github.com/Herrscherd/herrscher/core/internal/obs"
 	"github.com/Herrscherd/herrscher/core/internal/state"
 )
@@ -112,6 +113,29 @@ func captureDelays(t *testing.T, wantN int, now func() time.Time) []time.Duratio
 	}
 	s.runLoop(ctx, state.Session{Name: "demo"})
 	return delays
+}
+
+// TestRunLoopCountsBridgeRestart asserts a crash-restart bumps the metrics
+// registry's bridge-restart counter.
+func TestRunLoopCountsBridgeRestart(t *testing.T) {
+	var delays []time.Duration
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := NewSupervisor(ctx, "/herrscher/does-not-exist")
+	s.SetLogger(obs.NewLogger(io.Discard, slog.LevelInfo))
+	m := metrics.NewRegistry()
+	s.SetMetrics(m)
+	s.sleep = func(time.Duration) <-chan time.Time {
+		delays = append(delays, 0)
+		cancel()
+		ch := make(chan time.Time, 1)
+		ch <- time.Time{}
+		return ch
+	}
+	s.runLoop(ctx, state.Session{Name: "demo"})
+	if got := m.Snapshot().BridgeRestarts; got != 1 {
+		t.Fatalf("bridge restarts = %d, want 1", got)
+	}
 }
 
 // TestRunLoopBacksOffGeometrically asserts a tight crash loop (each attempt

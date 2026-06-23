@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Herrscherd/herrscher/core/internal/control"
+	"github.com/Herrscherd/herrscher/core/internal/metrics"
 	"github.com/Herrscherd/herrscher/core/internal/obs"
 	"github.com/Herrscherd/herrscher/core/internal/state"
 )
@@ -24,6 +25,8 @@ type Supervisor struct {
 	// drive the restart loop and its backoff without real wall-clock waits.
 	sleep func(time.Duration) <-chan time.Time
 	now   func() time.Time
+	// metrics records bridge-restart counts (nil = no recording, e.g. in tests).
+	metrics *metrics.Registry
 }
 
 // bridgeArgs builds the child `herrscher bridge` argv for sess.
@@ -61,6 +64,11 @@ func NewSupervisor(ctx context.Context, selfBin string) *Supervisor {
 // through (component=supervisor is attached for filtering).
 func (s *Supervisor) SetLogger(l *slog.Logger) {
 	s.log = l.With("component", "supervisor")
+}
+
+// SetMetrics installs the registry the supervisor records bridge restarts into.
+func (s *Supervisor) SetMetrics(m *metrics.Registry) {
+	s.metrics = m
 }
 
 // Start launches a supervised bridge for sess (idempotent per name).
@@ -104,6 +112,7 @@ func (s *Supervisor) runLoop(ctx context.Context, sess state.Session) {
 		if ctx.Err() != nil {
 			return
 		}
+		s.metrics.BridgeRestart()
 		delay := bo.Next(s.now().Sub(start))
 		s.log.Warn("bridge exited, restarting", "session", sess.Name, "delay", delay)
 		select {

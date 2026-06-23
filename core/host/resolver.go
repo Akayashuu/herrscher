@@ -9,6 +9,7 @@ import (
 
 	contracts "github.com/Herrscherd/herrscher-contracts"
 	transport "github.com/Herrscherd/herrscher-transport"
+	"github.com/Herrscherd/herrscher/core/internal/metrics"
 	"github.com/Herrscherd/herrscher/core/internal/obs"
 	"github.com/nats-io/nats.go"
 )
@@ -31,7 +32,8 @@ type Resolver struct {
 	remote  map[contracts.Category]bool
 	NatsURL string // "" => nats.DefaultURL; consulted only on the remote path
 
-	log *slog.Logger
+	log     *slog.Logger
+	metrics *metrics.Registry
 
 	// Retry/timeout knobs and clock seams for the remote path. dialMemory is the
 	// single-attempt dial (default dialRemoteMemoryOnce); tests inject a fake
@@ -63,6 +65,12 @@ func NewResolver(remote map[contracts.Category]bool, natsURL string) *Resolver {
 // (component=resolver is attached for filtering).
 func (r *Resolver) SetLogger(l *slog.Logger) {
 	r.log = l.With("component", "resolver")
+}
+
+// SetMetrics installs the registry remote-resolve attempts/failures/latency are
+// recorded into.
+func (r *Resolver) SetMetrics(m *metrics.Registry) {
+	r.metrics = m
 }
 
 func (r *Resolver) isRemote(c contracts.Category) bool {
@@ -117,9 +125,12 @@ func (r *Resolver) resolveMemoryWithRetry(ctx context.Context, p contracts.Plugi
 	attempt := 0
 	for {
 		attempt++
+		r.metrics.RemoteAttempt()
+		attemptStart := r.now()
 		actx, cancel := context.WithTimeout(ctx, r.attemptTimeout)
 		mem, err := r.dialMemory(actx, p)
 		cancel()
+		r.metrics.RemoteLatency(r.now().Sub(attemptStart))
 		if err == nil {
 			if attempt > 1 {
 				r.log.Debug("remote resolve recovered", "category", contracts.CategoryMemory, "attempt", attempt)
@@ -137,6 +148,7 @@ func (r *Resolver) resolveMemoryWithRetry(ctx context.Context, p contracts.Plugi
 		case <-r.sleep(bo.Next(0)):
 		}
 	}
+	r.metrics.RemoteFailure()
 	elapsed := r.now().Sub(start)
 	r.log.Warn("remote resolve gave up", "category", contracts.CategoryMemory, "attempts", attempt, "elapsed", elapsed, "err", lastErr)
 	return nil, &RemoteResolveError{Category: contracts.CategoryMemory, Attempts: attempt, Elapsed: elapsed, Err: lastErr}

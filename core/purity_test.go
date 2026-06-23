@@ -19,8 +19,9 @@ func TestCorePurity(t *testing.T) {
 	roots := []string{
 		"bridge", "config", "host", "service",
 		"internal/control", "internal/forge", "internal/health",
-		"internal/instanceid", "internal/manager", "internal/state",
-		"internal/supervisor", "internal/worktree",
+		"internal/instanceid", "internal/manager", "internal/metrics",
+		"internal/obs", "internal/state", "internal/supervisor",
+		"internal/worktree",
 	}
 	for _, r := range roots {
 		pkg, err := build.ImportDir(filepath.Join(".", r), 0)

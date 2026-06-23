@@ -8,6 +8,7 @@ import (
 
 	contracts "github.com/Herrscherd/herrscher-contracts"
 	control "github.com/Herrscherd/herrscher/core/internal/control"
+	"github.com/Herrscherd/herrscher/core/internal/metrics"
 	"github.com/Herrscherd/herrscher/core/internal/state"
 )
 
@@ -40,6 +41,9 @@ type sessionDriver struct {
 	participants string
 	seenMu       sync.Mutex
 	seen         map[string]bool
+
+	// metrics records turn lifecycle counters (nil = no recording, e.g. in tests).
+	metrics *metrics.Registry
 }
 
 func newSessionDriver(name string, gws []contracts.GatewaySet, toBridge chan<- contracts.Event, fromBridge <-chan contracts.Event) *sessionDriver {
@@ -193,18 +197,23 @@ func (d *sessionDriver) runTurn(ctx context.Context, ev contracts.Event) {
 // backend "reset" is a mid-turn progress event: it is fanned out and the turn
 // continues.
 func (d *sessionDriver) awaitTurn(ctx context.Context) {
+	d.metrics.TurnStarted()
 	for {
 		select {
 		case <-ctx.Done():
+			d.metrics.TurnAbandoned()
 			return
 		case <-d.hangup:
+			d.metrics.TurnAbandoned()
 			return // bridge connection ended; abandon this turn
 		case e, ok := <-d.from:
 			if !ok {
+				d.metrics.TurnAbandoned()
 				return // bridge connection lost; abandon this turn
 			}
 			d.fanOut(ctx, e)
 			if e.T == "reply" && e.Done {
+				d.metrics.TurnCompleted()
 				return
 			}
 		}
@@ -244,12 +253,13 @@ func gatewayChannel(g contracts.GatewaySet) string {
 // persistent Conn (input frames out, event frames in) to a sessionDriver, and
 // re-binds to a fresh Conn whenever the bridge reconnects (after a crash +
 // supervisor restart). It blocks until ctx is cancelled.
-func RunSession(ctx context.Context, name string, gws []contracts.GatewaySet, acc *control.Acceptor, participants string) {
+func RunSession(ctx context.Context, name string, gws []contracts.GatewaySet, acc *control.Acceptor, participants string, m *metrics.Registry) {
 	defer acc.Close() // own the acceptor: close the listener + remove the socket on shutdown
 	toBridge := make(chan contracts.Event)
 	fromBridge := make(chan contracts.Event)
 	d := newSessionDriver(name, gws, toBridge, fromBridge)
 	d.participants = participants
+	d.metrics = m
 	registerDriver(name, d)
 	defer unregisterDriver(name)
 	go d.run(ctx)

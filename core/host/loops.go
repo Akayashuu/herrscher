@@ -62,8 +62,9 @@ func statusContent(instanceID string, snap health.HealthSnapshot) string {
 	if instanceID != "" {
 		prefix = "[" + instanceID + "] "
 	}
-	return fmt.Sprintf("%s%s **dctl %s** · uptime %s · ping %dms · %d sessions",
-		prefix, dot, word, uptime, snap.PingMS, snap.Sessions)
+	m := snap.Metrics
+	return fmt.Sprintf("%s%s **dctl %s** · uptime %s · ping %dms · %d sessions · turns %d done/%d abandoned · %d restarts",
+		prefix, dot, word, uptime, snap.PingMS, snap.Sessions, m.TurnsCompleted, m.TurnsAbandoned, m.BridgeRestarts)
 }
 
 // statusLoop maintains a single self-updating status message in channelID via

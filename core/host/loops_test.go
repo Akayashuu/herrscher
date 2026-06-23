@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/Herrscherd/herrscher/core/internal/health"
+	"github.com/Herrscherd/herrscher/core/internal/metrics"
 )
 
 func TestStatusContent(t *testing.T) {
@@ -46,5 +47,24 @@ func TestStatusContent(t *testing.T) {
 				t.Fatalf("statusContent = %q, must not contain %q", got, tt.wantNoSubstr)
 			}
 		})
+	}
+}
+
+// TestStatusContentSurfacesMetrics asserts the periodic status embed carries the
+// runtime turn and restart counters from the metrics snapshot.
+func TestStatusContentSurfacesMetrics(t *testing.T) {
+	snap := health.HealthSnapshot{
+		Online: true,
+		Metrics: metrics.Snapshot{
+			TurnsCompleted: 9,
+			TurnsAbandoned: 2,
+			BridgeRestarts: 3,
+		},
+	}
+	got := statusContent("", snap)
+	for _, want := range []string{"turns", "9", "restart", "3"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("statusContent = %q, want it to surface %q", got, want)
+		}
 	}
 }

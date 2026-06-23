@@ -433,6 +433,11 @@ export DCTL_OWNER_ID=...          # optional: seeds the allowlist with you
 ./herrscher serve --health-addr :8787
 ```
 
+`GET /health` returns JSON liveness plus a `metrics` object — runtime counters
+(turns started/completed/abandoned, bridge restarts, remote resolve
+attempts/failures) and remote-call latency (count, p50/p95). The 60s status embed
+carries the turn and restart counts too.
+
 Then in Discord: `/set home #your-category`, `/session create name:hello`, and
 start talking in the session channel.
 

@@ -9,6 +9,7 @@ import (
 	contracts "github.com/Herrscherd/herrscher-contracts"
 	"github.com/Herrscherd/herrscher/core/cli"
 	control "github.com/Herrscherd/herrscher/core/internal/control"
+	"github.com/Herrscherd/herrscher/core/internal/metrics"
 	"github.com/Herrscherd/herrscher/core/internal/state"
 	"github.com/Herrscherd/herrscher/core/internal/supervisor"
 )
@@ -27,14 +28,15 @@ type hub struct {
 	gws     []Deps
 	partDir string
 	reg     *cli.Registry
+	metrics *metrics.Registry
 
 	dispatchMu sync.Mutex // serializes operator commands (and their reconcile)
 	mu         sync.Mutex
 	live       map[string]context.CancelFunc // session name → cancel its RunSession
 }
 
-func newHub(ctx context.Context, st *state.State, sup *supervisor.Supervisor, gws []Deps, partDir string, reg *cli.Registry) *hub {
-	return &hub{ctx: ctx, st: st, sup: sup, gws: gws, partDir: partDir, reg: reg, live: map[string]context.CancelFunc{}}
+func newHub(ctx context.Context, st *state.State, sup *supervisor.Supervisor, gws []Deps, partDir string, reg *cli.Registry, m *metrics.Registry) *hub {
+	return &hub{ctx: ctx, st: st, sup: sup, gws: gws, partDir: partDir, reg: reg, metrics: m, live: map[string]context.CancelFunc{}}
 }
 
 // goLive wires a session into the running hub: it opens the control-socket
@@ -54,7 +56,7 @@ func (h *hub) goLive(sess state.Session) {
 	}
 	sctx, cancel := context.WithCancel(h.ctx)
 	bound := boundGateways(h.gws, sess.BoundGateways())
-	go RunSession(sctx, sess.Name, bound, acc, state.ParticipantsPath(h.partDir, sess.Name))
+	go RunSession(sctx, sess.Name, bound, acc, state.ParticipantsPath(h.partDir, sess.Name), h.metrics)
 	h.live[sess.Name] = cancel
 }
 

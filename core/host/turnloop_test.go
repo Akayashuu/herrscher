@@ -187,7 +187,7 @@ func TestPickRegistryRoutesToLiveSession(t *testing.T) {
 	defer acc.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go RunSession(ctx, "pickreg", []contracts.GatewaySet{{Gateway: a, Reader: a}}, acc, "")
+	go RunSession(ctx, "pickreg", []contracts.GatewaySet{{Gateway: a, Reader: a}}, acc, "", nil)
 
 	waitFor(t, func() bool { return Pick("pickreg", "1") }, "Pick routes to the live session")
 	if Pick("does-not-exist", "1") {
@@ -316,7 +316,7 @@ func TestRunSessionReconnectsAndResumes(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go RunSession(ctx, "s1", []contracts.GatewaySet{{Gateway: a, Reader: a}}, acc, "")
+	go RunSession(ctx, "s1", []contracts.GatewaySet{{Gateway: a, Reader: a}}, acc, "", nil)
 
 	// First bridge connects, gets the input, then dies before replying.
 	c1 := dialCtl(t, sock)
@@ -347,7 +347,7 @@ func TestRunSessionReconnectsAfterCompletedTurn(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go RunSession(ctx, "s1", []contracts.GatewaySet{{Gateway: a, Reader: a}}, acc, "")
+	go RunSession(ctx, "s1", []contracts.GatewaySet{{Gateway: a, Reader: a}}, acc, "", nil)
 
 	// First bridge: gets q1, completes the turn with reply{done}, then dies while
 	// the driver is idle.

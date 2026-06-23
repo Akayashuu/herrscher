@@ -170,6 +170,7 @@ func RunHub(ctx context.Context, gws []Deps, o Options) error {
 	partDir := filepath.Dir(o.StatePath) // participants/<name>.log lives beside state.json
 	sup := supervisor.NewSupervisor(ctx, self)
 	sup.SetLogger(base)
+	sup.SetMetrics(h.Metrics())
 
 	instID, err := resolveInstanceID(st, o.InstanceID, o.Owner, log)
 	if err != nil {
@@ -185,7 +186,7 @@ func RunHub(ctx context.Context, gws []Deps, o Options) error {
 	if err != nil {
 		return fmt.Errorf("build command registry: %w", err)
 	}
-	hb := newHub(ctx, st, sup, gws, partDir, reg)
+	hb := newHub(ctx, st, sup, gws, partDir, reg, h.Metrics())
 
 	for _, sess := range st.SnapshotSessions() {
 		hb.goLive(sess)
