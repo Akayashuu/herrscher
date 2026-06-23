@@ -91,7 +91,7 @@ func TestRemoteResolveExhaustsAttemptsAndWarns(t *testing.T) {
 
 func TestRemoteResolveStopsAtBudget(t *testing.T) {
 	r := NewResolver(map[contracts.Category]bool{contracts.CategoryMemory: true}, "")
-	r.retryAttempts = 100        // high, so the budget — not the attempt cap — must stop it
+	r.retryAttempts = 100 // high, so the budget — not the attempt cap — must stop it
 	r.retryBudget = 10 * time.Second
 	tick := time.Unix(0, 0)
 	fastClock(r, func() time.Time { tick = tick.Add(6 * time.Second); return tick })
