@@ -8,40 +8,36 @@ agents, built on a hexagonal architecture: a narrow `herrscher-contracts` core w
 (Gateway, Backend, Memory, Orchestrator), composed at build time via blank imports. The host and core
 import zero platform-specific code — this is enforced by the purity tests.
 
-- **The three specs (what to build, in order):**
-  - **Spec A — Robustness & Observability:** [`docs/spec-observability.md`](docs/spec-observability.md)
+- **The remaining specs (what to build, in order):**
   - **Spec B — P1 Memory Policy (writing side):** [`docs/spec-memory-policy.md`](docs/spec-memory-policy.md)
   - **Spec C — Distribute more (remote backend/orchestrator + transport):** [`docs/spec-transport.md`](docs/spec-transport.md)
 
 ## Status
 
-The current `master` is healthy: agent provisioning shipped, P1 memory **read** scoping is wired, the
-remote-`memory` transport works, the full suite passes, and there are no TODO/FIXME markers. The three
-specs above are the agreed next body of work.
+`master` is healthy: agent provisioning shipped, P1 memory **read** scoping is wired, the
+remote-`memory` transport works, the full suite passes, and there are no TODO/FIXME markers.
 
-- **Spec A (4 stages)** — `slog` structured logging, exponential backoff with jitter, remote
-  timeouts + bounded retry, runtime metrics on the health surface.
-- **Spec B (4 stages)** — turn the dormant `Learner` into a real, scoped consolidation loop:
-  extractor registry, journal/cadence threading, run+persist scoped facts/skills, docs.
-- **Spec C (4 stages)** — generalize the remote-category mechanism, then remote orchestrator, remote
-  (streaming) backend, and mTLS for multi-machine.
+- **Spec A — Robustness & Observability — done.** Structured `slog` logging, exponential backoff with
+  jitter on the restart loops, remote timeouts + bounded retry, and runtime metrics on the health
+  surface are all merged.
+- **Spec B (4 stages) — remaining.** Turn the dormant `Learner` into a real, scoped consolidation
+  loop: extractor registry, journal/cadence threading, run+persist scoped facts/skills, docs.
+- **Spec C (4 stages) — remaining.** Generalize the remote-category mechanism, then remote
+  orchestrator, remote (streaming) backend, and mTLS for multi-machine.
 
 ## Order
 
-Work the specs **in this order — A, then B, then C** — and the stages **within each spec in order**.
-The rationale:
+Work the specs **in this order — B, then C** — and the stages **within each spec in order**. The
+rationale:
 
-1. **Spec A first.** It de-risks everything else: structured logging, backoff, remote timeouts/retry,
-   and metrics are the seams Spec C's remote backend/orchestrator must reuse. Building them first means
-   the harder distribution work is observable and resilient by construction.
-2. **Spec B second.** It is the highest product value (agents that actually learn) and is independent
-   of the transport work — it only needs the logging from A.
-3. **Spec C last.** The biggest and riskiest (a streaming remote backend, mTLS); it explicitly builds
-   on Spec A's timeout/retry/metrics seams, so it must come after them.
+1. **Spec B first.** It is the highest product value (agents that actually learn) and is independent
+   of the transport work — it builds only on the logging already shipped in Spec A.
+2. **Spec C last.** The biggest and riskiest (a streaming remote backend, mTLS); it explicitly builds
+   on the Spec A timeout/retry/metrics seams that already exist on `master`.
 
 ## The loop
 
-Work **one stage at a time**, in order, across all three specs (A1→A4, B1→B4, C1→C4). For each stage:
+Work **one stage at a time**, in order, across both specs (B1→B4, C1→C4). For each stage:
 
 ### 1. Implement the stage
 - Open a branch and a PR for that stage only.
@@ -88,8 +84,6 @@ next stage. Repeat until the last stage (C4) is done.
 Each stage is one PR, CI green (here and in any upstream module it touched), with its **Acceptance /
 tests** section satisfied — without regressing what ships.
 
-- **Spec A done:** logging is structured and level-controlled; restart loops back off with jitter;
-  remote calls have timeouts + bounded retry; runtime metrics are visible on the health surface.
 - **Spec B done:** with learning enabled, a session's tagged journal consolidates into shared project
   facts and private agent skills, idempotently and scoped; off by default; documented.
 - **Spec C done:** backend and orchestrator can run out-of-process behind the generalized remote
