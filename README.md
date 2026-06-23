@@ -273,7 +273,7 @@ flowchart TB
     DISPATCH --> CMDS["session create·close·list·who<br/>set home·source · service restart·update"]
     CMDS -->|session create| SUP["supervisor.Start(session)"]
     SUP --> CHILD["spawn child:<br/>herrscher bridge -c CHANNEL --cmd ...<br/>(in the session worktree)"]
-    CHILD -->|exits| RESTART["restart in 3s"] --> CHILD
+    CHILD -->|exits| RESTART["restart w/ backoff+jitter"] --> CHILD
 ```
 
 ### `bridge` — the pure-runner backend loop
@@ -310,7 +310,7 @@ stateDiagram-v2
     Created --> Worktree: branch session/x + isolated tree<br/>(unless shared:true)
     Worktree --> Channel: CreateUnder(home) or ForumPost(home)
     Channel --> Running: supervisor spawns the bridge child
-    Running --> Running: restart in 3s if the bridge exits
+    Running --> Running: restart w/ backoff+jitter if the bridge exits
     Running --> Closed: /session close name:x
     Closed --> [*]: stop bridge · remove worktree · archive channel
 ```
