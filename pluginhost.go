@@ -17,7 +17,7 @@ import (
 
 func runPluginHost(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("plugin-host", flag.ContinueOnError)
-	category := fs.String("category", "", "plugin category to host (e.g. memory)")
+	category := fs.String("category", "", "plugin category to host (e.g. memory, orchestrator)")
 	natsURL := fs.String("nats", nats.DefaultURL, "NATS server URL")
 	instanceID := fs.String("instance", "", "process instance id")
 	if err := fs.Parse(args); err != nil {
@@ -27,36 +27,39 @@ func runPluginHost(ctx context.Context, args []string) error {
 		return fmt.Errorf("plugin-host: unsupported category %q", *category)
 	}
 
-	// memory is the only category SupportedRemoteCategory admits today, so the
-	// host serves the Memory port directly below. Registering another remote
-	// category (Spec C2+) means branching here on *category to serve its
-	// skeleton — the gate alone would otherwise admit a category this body
-	// cannot honor.
+	// SupportedRemoteCategory gates *category above; here we build the real
+	// plugin for it and select its skeleton. Each remote category serves a
+	// different port over the shared Plugin service, so the build+register pair
+	// branches on *category — adding a category is one case, not a new host.
 	var (
-		real     contracts.Memory
-		manifest contracts.Manifest
+		manifest  contracts.Manifest
+		register  func(*grpc.Server)
+		closeReal func()
 	)
-	for _, p := range contracts.Default.Memories() {
-		if p.Memory == nil {
-			continue
-		}
-		cfg, err := contracts.Resolve(p.Manifest.Config, os.Getenv)
+	switch contracts.Category(*category) {
+	case contracts.CategoryMemory:
+		real, m, err := firstMemory(ctx)
 		if err != nil {
 			return err
 		}
-		if real, err = p.Memory(ctx, cfg); err != nil {
+		manifest, register, closeReal = m,
+			func(s *grpc.Server) { transport.RegisterMemorySkeleton(s, real) },
+			func() { _ = real.Close() }
+	case contracts.CategoryOrchestrator:
+		real, m, err := firstOrchestrator(ctx)
+		if err != nil {
 			return err
 		}
-		manifest = p.Manifest
-		break
+		manifest, register, closeReal = m,
+			func(s *grpc.Server) { transport.RegisterOrchestratorSkeleton(s, real) },
+			func() { _ = real.Close() }
+	default:
+		return fmt.Errorf("plugin-host: category %q passed the support gate but has no skeleton", *category)
 	}
-	if real == nil {
-		return fmt.Errorf("plugin-host: no memory plugin registered")
-	}
-	// The plugin-host owns the real Memory: it builds it once, serves it to every
+	// The plugin-host owns the real plugin: it builds it once, serves it to every
 	// client, and closes it once on shutdown. Client proxies only close their own
 	// gRPC connection, never the shared object.
-	defer real.Close()
+	defer closeReal()
 
 	// Local cancel so the heartbeat and GracefulStop goroutines also unwind when
 	// Serve returns on its own (e.g. a listener error), not only on parent ctx.
@@ -68,7 +71,7 @@ func runPluginHost(ctx context.Context, args []string) error {
 		return err
 	}
 	s := grpc.NewServer()
-	transport.RegisterMemorySkeleton(s, real)
+	register(s)
 
 	nc, err := nats.Connect(*natsURL)
 	if err != nil {
@@ -93,4 +96,46 @@ func runPluginHost(ctx context.Context, args []string) error {
 
 	go func() { <-ctx.Done(); s.GracefulStop() }()
 	return s.Serve(lis)
+}
+
+// firstMemory builds the first registered memory plugin from its resolved env
+// config, returning it with its manifest for announcement.
+func firstMemory(ctx context.Context) (contracts.Memory, contracts.Manifest, error) {
+	for _, p := range contracts.Default.Memories() {
+		if p.Memory == nil {
+			continue
+		}
+		cfg, err := contracts.Resolve(p.Manifest.Config, os.Getenv)
+		if err != nil {
+			return nil, contracts.Manifest{}, fmt.Errorf("memory plugin-host: %w", err)
+		}
+		m, err := p.Memory(ctx, cfg)
+		if err != nil {
+			return nil, contracts.Manifest{}, fmt.Errorf("memory plugin-host: %w", err)
+		}
+		return m, p.Manifest, nil
+	}
+	return nil, contracts.Manifest{}, fmt.Errorf("plugin-host: no memory plugin registered")
+}
+
+// firstOrchestrator builds the first registered orchestrator plugin. The remote
+// orchestrator runs without the host's in-process Memory or the
+// session/scope/learn config bag (those are bridge-owned runtime state): C2
+// ships the request/response proxy, not remote scope threading.
+func firstOrchestrator(ctx context.Context) (contracts.Orchestrator, contracts.Manifest, error) {
+	for _, p := range contracts.Default.Orchestrators() {
+		if p.Orchestrator == nil {
+			continue
+		}
+		cfg, err := contracts.Resolve(p.Manifest.Config, os.Getenv)
+		if err != nil {
+			return nil, contracts.Manifest{}, fmt.Errorf("orchestrator plugin-host: %w", err)
+		}
+		o, err := p.Orchestrator(ctx, cfg, nil)
+		if err != nil {
+			return nil, contracts.Manifest{}, fmt.Errorf("orchestrator plugin-host: %w", err)
+		}
+		return o, p.Manifest, nil
+	}
+	return nil, contracts.Manifest{}, fmt.Errorf("plugin-host: no orchestrator plugin registered")
 }

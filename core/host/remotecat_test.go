@@ -10,20 +10,24 @@ import (
 	contracts "github.com/Herrscherd/herrscher-contracts"
 )
 
-func TestSupportedRemoteCategoriesAreExactlyMemory(t *testing.T) {
-	if !SupportedRemoteCategory(contracts.CategoryMemory) {
-		t.Fatal("memory must be a supported remote category")
-	}
-	// Spec C grows this set later (orchestrator, backend); not yet.
+func TestSupportedRemoteCategoriesAreMemoryAndOrchestrator(t *testing.T) {
 	for _, c := range []contracts.Category{
-		contracts.CategoryOrchestrator, contracts.CategoryBackend, contracts.CategoryGateway,
+		contracts.CategoryMemory, contracts.CategoryOrchestrator,
 	} {
-		if SupportedRemoteCategory(c) {
-			t.Fatalf("%q must not be remote-supported yet (Spec C)", c)
+		if !SupportedRemoteCategory(c) {
+			t.Fatalf("%q must be a supported remote category (C1/C2)", c)
 		}
 	}
-	if n := len(supportedRemoteCategories); n != 1 {
-		t.Fatalf("expected exactly one supported remote category (memory), got %d: %v", n, supportedRemoteCategories)
+	// The streaming backend (C3) and gateway are not remote-capable yet.
+	for _, c := range []contracts.Category{
+		contracts.CategoryBackend, contracts.CategoryGateway,
+	} {
+		if SupportedRemoteCategory(c) {
+			t.Fatalf("%q must not be remote-supported yet", c)
+		}
+	}
+	if n := len(supportedRemoteCategories); n != 2 {
+		t.Fatalf("expected exactly two supported remote categories (memory, orchestrator), got %d: %v", n, supportedRemoteCategories)
 	}
 }
 

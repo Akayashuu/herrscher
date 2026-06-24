@@ -102,6 +102,19 @@ func buildOrchestrator(ctx context.Context, mem contracts.Memory, session, proje
 		log.Debug("orchestrator disabled", "kind", kind, "err", err)
 		return nil
 	}
+	// Remote (opt-in via HERRSCHER_REMOTE=orchestrator): resolve a proxy to an
+	// out-of-process orchestrator, reusing the Stage A retry/timeout/metrics on
+	// the resolver. The remote orchestrator owns its config in its plugin-host, so
+	// the session/scope/learn bag below applies to the local path only. When
+	// orchestrator is not remote the resolver returns (nil, nil) and we build
+	// local as today.
+	r := host.NewResolver(remoteCategories(), os.Getenv("HERRSCHER_NATS"))
+	r.SetLogger(log)
+	if orch, err := r.Orchestrator(ctx, contracts.Default.Orchestrators()); err != nil {
+		return disabled("orchestrator", err)
+	} else if orch != nil {
+		return orch
+	}
 	for _, p := range contracts.Default.Orchestrators() {
 		if p.Orchestrator == nil {
 			continue

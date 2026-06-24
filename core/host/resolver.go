@@ -38,12 +38,13 @@ type Resolver struct {
 	// Retry/timeout knobs and clock seams for the remote path. dialMemory is the
 	// single-attempt dial (default dialRemoteMemoryOnce); tests inject a fake
 	// transport and a fast clock so retries run without real wall-clock waits.
-	retryAttempts  int
-	retryBudget    time.Duration
-	attemptTimeout time.Duration
-	dialMemory     func(context.Context, contracts.Plugin) (contracts.Memory, error)
-	now            func() time.Time
-	sleep          func(time.Duration) <-chan time.Time
+	retryAttempts    int
+	retryBudget      time.Duration
+	attemptTimeout   time.Duration
+	dialMemory       func(context.Context, contracts.Plugin) (contracts.Memory, error)
+	dialOrchestrator func(context.Context, contracts.Plugin) (contracts.Orchestrator, error)
+	now              func() time.Time
+	sleep            func(time.Duration) <-chan time.Time
 }
 
 func NewResolver(remote map[contracts.Category]bool, natsURL string) *Resolver {
@@ -58,6 +59,7 @@ func NewResolver(remote map[contracts.Category]bool, natsURL string) *Resolver {
 		sleep:          time.After,
 	}
 	r.dialMemory = r.dialRemoteMemoryOnce
+	r.dialOrchestrator = r.dialRemoteOrchestratorOnce
 	return r
 }
 
@@ -100,6 +102,26 @@ func (r *Resolver) Memory(ctx context.Context, plugins []contracts.Plugin, geten
 	return nil, nil
 }
 
+// Orchestrator resolves a REMOTE orchestrator proxy when HERRSCHER_REMOTE names
+// "orchestrator", reusing the same retry/timeout/metrics harness as Memory. It
+// returns (nil, nil) when the category is not remote: the local orchestrator
+// needs runtime state the resolver does not hold (the in-process Memory plus the
+// session/scope/learn config bag), so the caller builds the local one itself.
+func (r *Resolver) Orchestrator(ctx context.Context, plugins []contracts.Plugin) (contracts.Orchestrator, error) {
+	if !r.isRemote(contracts.CategoryOrchestrator) {
+		return nil, nil
+	}
+	for _, p := range plugins {
+		if p.Orchestrator == nil {
+			continue
+		}
+		p := p
+		return resolveRemoteWithRetry(r, ctx, contracts.CategoryOrchestrator,
+			func(c context.Context) (contracts.Orchestrator, error) { return r.dialOrchestrator(c, p) })
+	}
+	return nil, nil
+}
+
 // RemoteResolveError reports that a remote category could not be resolved within
 // the retry budget. It carries the category, attempts made, and elapsed time so
 // the caller can degrade cleanly; Unwrap exposes the last underlying error.
@@ -121,8 +143,8 @@ func (e *RemoteResolveError) Unwrap() error { return e.Err }
 // failures on the Stage A2 backoff until either an attempt succeeds, the attempt
 // cap is hit, the total budget elapses, or ctx is cancelled. It is generic over
 // the port type so every remote category reuses the same retry/timeout/metrics
-// machinery via its own one-shot dial; memory is the only caller today
-// (orchestrator and backend join it in later Spec C stages).
+// machinery via its own one-shot dial; memory and orchestrator are the callers
+// as of C2 (the streaming backend joins in C3).
 func resolveRemoteWithRetry[T any](r *Resolver, ctx context.Context, cat contracts.Category, dial func(context.Context) (T, error)) (T, error) {
 	var zero T
 	start := r.now()
@@ -195,6 +217,38 @@ func (r *Resolver) dialRemoteMemoryOnce(ctx context.Context, _ contracts.Plugin)
 		case <-seen:
 		case <-ctx.Done():
 			return nil, fmt.Errorf("resolver: no remote memory announced: %w", ctx.Err())
+		}
+	}
+}
+
+// dialRemoteOrchestratorOnce is one remote-resolve attempt for the orchestrator:
+// connect to NATS, watch for an orchestrator announcement, and dial its gRPC
+// proxy. Same shape as dialRemoteMemoryOnce; ctx bounds the announcement wait.
+func (r *Resolver) dialRemoteOrchestratorOnce(ctx context.Context, _ contracts.Plugin) (contracts.Orchestrator, error) {
+	nc, err := nats.Connect(r.natsURL())
+	if err != nil {
+		return nil, err
+	}
+	defer nc.Close()
+	reg := transport.NewRemoteRegistry()
+	seen := make(chan struct{}, 1)
+	if err := transport.WatchAnnouncements(nc, func(a transport.Announcement) {
+		reg.Observe(a)
+		select {
+		case seen <- struct{}{}:
+		default:
+		}
+	}); err != nil {
+		return nil, err
+	}
+	for {
+		if orchs := reg.Orchestrators(); len(orchs) > 0 {
+			return transport.DialOrchestrator(ctx, orchs[0])
+		}
+		select {
+		case <-seen:
+		case <-ctx.Done():
+			return nil, fmt.Errorf("resolver: no remote orchestrator announced: %w", ctx.Err())
 		}
 	}
 }

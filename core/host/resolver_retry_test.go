@@ -161,3 +161,95 @@ func TestLocalResolveSkipsRetrySeam(t *testing.T) {
 		t.Fatalf("local path must not call the remote retry seam, got %d calls", calls)
 	}
 }
+
+// orchestratorPlugin is an orchestrator plugin whose factory is non-nil (so the
+// remote branch is entered) but is never called on the remote path.
+func orchestratorPlugin() []contracts.Plugin {
+	return []contracts.Plugin{{
+		Manifest: contracts.Manifest{Category: contracts.CategoryOrchestrator},
+		Orchestrator: func(context.Context, contracts.PluginConfig, contracts.Memory) (contracts.Orchestrator, error) {
+			return nil, nil
+		},
+	}}
+}
+
+// TestRemoteResolveOrchestratorRetriesThenSucceeds proves the orchestrator reuses
+// the same Stage A retry harness as memory: a transient dial failure is retried
+// within budget and the recovered proxy is returned.
+func TestRemoteResolveOrchestratorRetriesThenSucceeds(t *testing.T) {
+	r := NewResolver(map[contracts.Category]bool{contracts.CategoryOrchestrator: true}, "")
+	frozen := time.Unix(0, 0)
+	fastClock(r, func() time.Time { return frozen })
+
+	want := &recordingOrch{}
+	var calls int
+	r.dialOrchestrator = func(context.Context, contracts.Plugin) (contracts.Orchestrator, error) {
+		calls++
+		if calls <= 2 {
+			return nil, errors.New("transient")
+		}
+		return want, nil
+	}
+
+	got, err := r.Orchestrator(context.Background(), orchestratorPlugin())
+	if err != nil {
+		t.Fatalf("expected success within the retry budget, got %v", err)
+	}
+	if got != contracts.Orchestrator(want) {
+		t.Fatalf("got %v, want the dialed orchestrator", got)
+	}
+	if calls != 3 {
+		t.Fatalf("expected 3 attempts (2 fail, 1 succeed), got %d", calls)
+	}
+}
+
+// TestRemoteResolveOrchestratorFailsCleanlyWithMetrics asserts a give-up returns
+// a typed error (not a panic) and moves the same metrics counters memory does.
+func TestRemoteResolveOrchestratorFailsCleanlyWithMetrics(t *testing.T) {
+	h := health.NewHealth(time.Unix(0, 0))
+	r := NewResolver(map[contracts.Category]bool{contracts.CategoryOrchestrator: true}, "")
+	r.SetMetrics(h.Metrics())
+	frozen := time.Unix(0, 0)
+	fastClock(r, func() time.Time { return frozen })
+	r.dialOrchestrator = func(context.Context, contracts.Plugin) (contracts.Orchestrator, error) {
+		return nil, context.DeadlineExceeded
+	}
+
+	got, err := r.Orchestrator(context.Background(), orchestratorPlugin())
+	if got != nil {
+		t.Fatalf("expected nil orchestrator on give-up, got %v", got)
+	}
+	var rre *RemoteResolveError
+	if !errors.As(err, &rre) {
+		t.Fatalf("expected *RemoteResolveError, got %T: %v", err, err)
+	}
+	if rre.Category != contracts.CategoryOrchestrator {
+		t.Fatalf("error category = %q, want orchestrator", rre.Category)
+	}
+	m := h.Snapshot(time.Unix(1, 0), 30*time.Second).Metrics
+	if m.RemoteAttempts != int64(r.retryAttempts) || m.RemoteFailures != 1 {
+		t.Fatalf("metrics did not move: attempts=%d failures=%d", m.RemoteAttempts, m.RemoteFailures)
+	}
+}
+
+// TestLocalOrchestratorResolveSkipsDial is the C2 "zero dials when local" check:
+// without orchestrator in HERRSCHER_REMOTE, Orchestrator returns (nil, nil) and
+// never touches the dial seam, leaving buildOrchestrator to build in-process.
+func TestLocalOrchestratorResolveSkipsDial(t *testing.T) {
+	r := NewResolver(nil, "") // nothing remote
+	var calls int
+	r.dialOrchestrator = func(context.Context, contracts.Plugin) (contracts.Orchestrator, error) {
+		calls++
+		return nil, nil
+	}
+	orch, err := r.Orchestrator(context.Background(), orchestratorPlugin())
+	if err != nil {
+		t.Fatalf("local resolve: %v", err)
+	}
+	if orch != nil {
+		t.Fatalf("Orchestrator must return (nil, nil) on the local path, got %v", orch)
+	}
+	if calls != 0 {
+		t.Fatalf("local path must not dial the remote orchestrator, got %d calls", calls)
+	}
+}
