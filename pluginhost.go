@@ -27,6 +27,15 @@ func runPluginHost(ctx context.Context, args []string) error {
 		return fmt.Errorf("plugin-host: unsupported category %q", *category)
 	}
 
+	// Fail fast and fail closed: a half-configured TLS env refuses to start
+	// rather than silently serving plaintext off-loopback. Validated before any
+	// plugin is built so a misconfiguration never reaches I/O. No TLS env set =>
+	// plaintext on the (default loopback) bind, exactly as before.
+	tlsCfg := tlsConfigFromEnv()
+	if err := tlsCfg.Validate(); err != nil {
+		return fmt.Errorf("plugin-host: %w", err)
+	}
+
 	// SupportedRemoteCategory gates *category above; here we build the real
 	// plugin for it and select its skeleton. Each remote category serves a
 	// different port over the shared Plugin service, so the build+register pair
@@ -74,11 +83,20 @@ func runPluginHost(ctx context.Context, args []string) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	lis, err := net.Listen("tcp", bindAddr())
 	if err != nil {
 		return err
 	}
-	s := grpc.NewServer()
+	var s *grpc.Server
+	if tlsCfg.Enabled() {
+		creds, err := tlsCfg.ServerCredentials()
+		if err != nil {
+			return fmt.Errorf("plugin-host: %w", err)
+		}
+		s = grpc.NewServer(grpc.Creds(creds))
+	} else {
+		s = grpc.NewServer()
+	}
 	register(s)
 
 	nc, err := nats.Connect(*natsURL)

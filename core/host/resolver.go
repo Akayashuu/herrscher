@@ -12,6 +12,7 @@ import (
 	"github.com/Herrscherd/herrscher/core/internal/metrics"
 	"github.com/Herrscherd/herrscher/core/internal/obs"
 	"github.com/nats-io/nats.go"
+	"google.golang.org/grpc/credentials"
 )
 
 // Remote-resolve retry/timeout defaults. They bound a remote dial so a slow or
@@ -31,6 +32,10 @@ const (
 type Resolver struct {
 	remote  map[contracts.Category]bool
 	NatsURL string // "" => nats.DefaultURL; consulted only on the remote path
+
+	// creds authenticates the remote dial. nil => plaintext loopback (the
+	// single-host default); a non-nil mTLS credential makes off-loopback safe.
+	creds credentials.TransportCredentials
 
 	log     *slog.Logger
 	metrics *metrics.Registry
@@ -75,6 +80,13 @@ func (r *Resolver) SetLogger(l *slog.Logger) {
 // recorded into.
 func (r *Resolver) SetMetrics(m *metrics.Registry) {
 	r.metrics = m
+}
+
+// SetCredentials installs the transport credentials the remote dial authenticates
+// with. nil keeps plaintext loopback (the default); an mTLS credential is required
+// to dial a category running on another host.
+func (r *Resolver) SetCredentials(c credentials.TransportCredentials) {
+	r.creds = c
 }
 
 func (r *Resolver) isRemote(c contracts.Category) bool {
@@ -234,7 +246,7 @@ func (r *Resolver) dialRemoteMemoryOnce(ctx context.Context, _ contracts.Plugin)
 	}
 	for {
 		if mems := reg.Memories(); len(mems) > 0 {
-			return transport.DialMemory(ctx, mems[0])
+			return transport.DialMemory(ctx, mems[0], r.creds)
 		}
 		select {
 		case <-seen:
@@ -266,7 +278,7 @@ func (r *Resolver) dialRemoteOrchestratorOnce(ctx context.Context, _ contracts.P
 	}
 	for {
 		if orchs := reg.Orchestrators(); len(orchs) > 0 {
-			return transport.DialOrchestrator(ctx, orchs[0])
+			return transport.DialOrchestrator(ctx, orchs[0], r.creds)
 		}
 		select {
 		case <-seen:
@@ -298,7 +310,7 @@ func (r *Resolver) dialRemoteBackendOnce(ctx context.Context, _ contracts.Plugin
 	}
 	for {
 		if bes := reg.Backends(); len(bes) > 0 {
-			return transport.DialBackend(ctx, bes[0])
+			return transport.DialBackend(ctx, bes[0], r.creds)
 		}
 		select {
 		case <-seen:
