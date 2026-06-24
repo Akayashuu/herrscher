@@ -8,8 +8,8 @@ github.com/Herrscherd/herrscher-discord-gateway v0.2.1 h1:v2tFThIsxR9rAReuNZbmNG
 github.com/Herrscherd/herrscher-discord-gateway v0.2.1/go.mod h1:e3s3er0ntNO0aq4xFWK0RwMqNLbYvtRuXYq0YwhwOh0=
 github.com/Herrscherd/herrscher-obsidian-memory v0.1.1 h1:zs4eXE86vwJkJxFdjCt1wpKbb1ksW44pSibqyF5HDJg=
 github.com/Herrscherd/herrscher-obsidian-memory v0.1.1/go.mod h1:ntKFiYHtNYbr6igBgOfCK7xJE3H4Om5DZPTdCX6EbqQ=
-github.com/Herrscherd/herrscher-orchestrator v0.1.3 h1:Q5ELAPMNu0JasbcEy4o8PKPe4UDElFXzes9sOLQbiZ4=
-github.com/Herrscherd/herrscher-orchestrator v0.1.3/go.mod h1:apnaYEev+VzVAcVPzET5OCIAYtzIanO77NOidpCBVHo=
+github.com/Herrscherd/herrscher-orchestrator v0.1.4 h1:S0re6g7UxdCKY515oYjqSx1M+IuLyPpRAI0vlVg6pv4=
+github.com/Herrscherd/herrscher-orchestrator v0.1.4/go.mod h1:apnaYEev+VzVAcVPzET5OCIAYtzIanO77NOidpCBVHo=
 github.com/Herrscherd/herrscher-transport v0.1.1 h1:rWPwfAI4oRQB4uFzIFAFxGTlPTYKWYfE/XlWZ8RlJjQ=
 github.com/Herrscherd/herrscher-transport v0.1.1/go.mod h1:bCt4DsxyzcI8uVdWfDegxydBpryqYk2ZSC/qsHXWAb0=
 github.com/atotto/clipboard v0.1.4 h1:EH0zSVneZPSuFR11BlR9YppQTVDbh5+16AmcJi4g1z4=
