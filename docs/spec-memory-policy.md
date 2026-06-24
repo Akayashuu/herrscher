@@ -70,7 +70,7 @@ heuristics live entirely in the closed module. The host-side stages below theref
 
 ---
 
-## Stage B2 — Thread the journal path and consolidation cadence from the bridge
+## Stage B2 — Thread the journal path and consolidation cadence from the bridge — **shipped (#19)**
 
 **Goal:** give the Learner its inputs. The bridge must pass a journal path and a cadence so
 `Consolidate()` has something to read and a trigger to run.
@@ -96,26 +96,40 @@ heuristics live entirely in the closed module. The host-side stages below theref
 
 ---
 
-## Stage B3 — Run consolidation and persist scoped facts/skills
+## Stage B3 — Prove the consolidation write loop end to end and lock the scope/idempotence guarantees
 
-**Goal:** actually invoke `Consolidate()` at the right moment so extracted facts land in **shared**
-project memory and extracted skills land in **private** agent memory, honoring the scope.
+**Goal:** with B2 shipped, the Learner is now constructed and fed — but nothing in `herrscher`'s own
+suite *proves* that an enabled session actually writes the right scoped entries. B3 closes that gap and
+nails the policy down with host-level tests, rather than trusting the upstream unit tests alone.
 
-**Scope** (`herrscher-orchestrator` consolidation trigger + `herrscher` wiring)
-- Drive `Consolidate()` from a defined trigger: after a turn completes and/or every
-  `memory.consolidate-every` turns (cadence from B2). Ensure it is invoked on the orchestrator the
-  bridge already owns — no new long-lived goroutine that can outlive the session without cancellation.
-- Confirm the persist path uses `contracts.RecordShared` for facts (scope: `projects/<project>`) and
-  `contracts.RecordPrivate` for skills (scope: `agents/<agent>`), as `learner.go:43-87` intends.
-- De-dup against already-recorded entries so re-running consolidation is idempotent (no duplicate
-  facts every turn) — reuse the contracts' key-dedup, and skip writes when nothing new was extracted.
+**What already ships upstream (do not rebuild).** `herrscher-orchestrator@v0.1.3` already:
+- drives `Consolidate()` from a real trigger — `Learner.Observe()` auto-fires every
+  `memory.consolidate-every` turns on the orchestrator the bridge already owns (`learner.go`), so there
+  is **no** new host goroutine to add;
+- persists via `contracts.RecordShared` for facts (scope `projects/<project>`) and
+  `contracts.RecordPrivate` for skills (scope `agents/<agent>`);
+- de-dups on the contracts' key so re-running over the same journal is idempotent, and skips writes
+  when the extractor returns nothing.
+
+So B3 is **not** new wiring — it is the end-to-end verification that B2's activation reaches those
+upstream guarantees, plus any thin glue the e2e exposes as missing.
+
+**Scope** (`herrscher` test surface; only touch `bridge.go`/orchestrator config if the e2e proves a
+real gap)
+- Register a **fake extractor** (like `bridge_test.go`'s `b2-fake`) that emits one tagged fact and one
+  tagged skill, and a **fake Memory** port that records every `Record*` call's scope + key.
+- Build the orchestrator through `buildOrchestrator` with that extractor + a small `consolidate-every`,
+  feed a journal, drive enough `Observe`/turns to cross the cadence, and assert the writes.
+- If — and only if — the e2e shows the journal path or cadence is not actually honored end to end, fix
+  that thin glue in `bridge.go`; otherwise B3 ships as tests only.
 
 **Acceptance / tests** (fake Memory port capturing writes)
-- A session whose journal gains a tagged fact and a tagged skill, run through the consolidation
-  trigger, produces exactly one shared write under `projects/<project>` and one private write under
+- An enabled session whose journal gains a tagged fact and a tagged skill, run past the cadence,
+  produces exactly one shared write under `projects/<project>` and one private write under
   `agents/<agent>` — asserted on the fake Memory's recorded scope + key.
-- Running consolidation twice over the same journal produces **no** second write (idempotence).
+- Running the same journal through consolidation twice produces **no** second write (idempotence).
 - A session with no extractor configured performs **zero** consolidation writes (default unchanged).
+- Full `herrscher` suite + purity tests green.
 
 ---
 
