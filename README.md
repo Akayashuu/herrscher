@@ -562,8 +562,13 @@ of these can be supplied via the root `.env` (see [Configuration](#configuration
 Operator logging: `HERRSCHER_LOG` sets the structured (`log/slog`) level on stderr
 — `debug|info|warn|error`, default `info`; the bridge's `-v` flag forces `debug`.
 Remote transport (opt-in, see [Roadmap](#roadmap)): `HERRSCHER_REMOTE` —
-comma-separated categories to run out-of-process (e.g. `memory`; unset ⇒ all
-in-process) — and `HERRSCHER_NATS` — the NATS URL (default `nats://127.0.0.1:4222`).
+comma-separated categories to run out-of-process (`memory`, `orchestrator`,
+`backend`; unset ⇒ all in-process) — and `HERRSCHER_NATS` — the NATS URL (default
+`nats://127.0.0.1:4222`). For multi-machine, set the plugin-host bind with
+`HERRSCHER_BIND` (default `127.0.0.1:0`) and turn on mTLS with `HERRSCHER_TLS_CA`,
+`HERRSCHER_TLS_CERT`, `HERRSCHER_TLS_KEY` (all three or none — a partial set fails
+closed). With TLS unset the transport stays plaintext loopback, exactly as a
+single-host deployment.
 
 ---
 
@@ -704,15 +709,16 @@ plugin (the Discord gateway needs `DISCORD_BOT_TOKEN`).
 
 - **More catalog kinds** — additional gateway/backend/memory/orchestrator modules
   in the `herrscher init` catalog beyond the current defaults.
-- **Distributed transport** — first cut landed: a plugin **category can run as a
-  separate process** over NATS (discovery) + gRPC (port calls), opt-in via
-  `HERRSCHER_REMOTE` with `memory` carried first; in-process stays the default. The
-  wire lives in the separate `herrscher-transport` module, and remote mode needs a
-  NATS server at `$HERRSCHER_NATS`. Remote resolves are bounded by a per-attempt
-  timeout and retried on backoff within a total deadline (in-process stays
-  immediate). Still ahead: the other categories, streaming
-  events over NATS, and the multi-machine flip (mTLS + creds) — all config, no
-  contract change.
+- **Distributed transport** — shipped: any of **memory**, **orchestrator**, and
+  the streaming **backend** can run as a separate process over NATS (discovery) +
+  gRPC (port calls), opt-in per category via `HERRSCHER_REMOTE`; in-process stays
+  the default. The wire lives in the separate `herrscher-transport` module, and
+  remote mode needs a NATS server at `$HERRSCHER_NATS`. Remote resolves are bounded
+  by a per-attempt timeout and retried on backoff within a total deadline
+  (in-process stays immediate). The backend streams its turn events; a lost stream
+  abandons the in-flight turn cleanly and the next input proceeds. **Multi-machine**
+  is a config flip: set `HERRSCHER_BIND` off loopback and supply an mTLS CA/cert/key
+  via `HERRSCHER_TLS_*` (fail-closed on a partial set) — no contract change.
 
 ---
 

@@ -44,8 +44,10 @@ func runBridge(ctx context.Context, args []string) error {
 	// HERRSCHER_REMOTE names "backend" the resolver returns an out-of-process
 	// streaming proxy instead; otherwise it returns (nil, nil) and we build the
 	// local claude backend exactly as before.
-	br := host.NewResolver(remoteCategories(), os.Getenv("HERRSCHER_NATS"))
-	br.SetLogger(log)
+	br, err := newResolver(log)
+	if err != nil {
+		return err
+	}
 	newBackend := func(channelID string) (contracts.Backend, error) {
 		if be, err := br.Backend(ctx, contracts.Default.Backends()); err != nil {
 			return nil, err
@@ -85,8 +87,10 @@ func buildMemory(ctx context.Context, log *slog.Logger) contracts.Memory {
 		log.Debug("memory disabled", "kind", kind, "err", err)
 		return nil
 	}
-	r := host.NewResolver(remoteCategories(), os.Getenv("HERRSCHER_NATS"))
-	r.SetLogger(log)
+	r, err := newResolver(log)
+	if err != nil {
+		return disabled("memory", err)
+	}
 	mem, err := r.Memory(ctx, contracts.Default.Memories(), os.Getenv)
 	if err != nil {
 		return disabled("memory", err)
@@ -119,8 +123,10 @@ func buildOrchestrator(ctx context.Context, mem contracts.Memory, session, proje
 	// the session/scope/learn bag below applies to the local path only. When
 	// orchestrator is not remote the resolver returns (nil, nil) and we build
 	// local as today.
-	r := host.NewResolver(remoteCategories(), os.Getenv("HERRSCHER_NATS"))
-	r.SetLogger(log)
+	r, err := newResolver(log)
+	if err != nil {
+		return disabled("orchestrator", err)
+	}
 	if orch, err := r.Orchestrator(ctx, contracts.Default.Orchestrators()); err != nil {
 		return disabled("orchestrator", err)
 	} else if orch != nil {
