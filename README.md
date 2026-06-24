@@ -33,6 +33,7 @@ guarded by purity tests (`TestHostPurity`, `TestCorePurity`).
 - [Session lifecycle](#session-lifecycle)
 - [Durable agents](#durable-agents)
   - [Memory scope (shared vs private)](#memory-scope-shared-vs-private)
+  - [Learning (the write side)](#learning-the-write-side)
 - [Installation](#installation)
 - [CLI reference](#cli-reference)
 - [Managing plugins](#managing-plugins-the-init--plugin--update--install-verbs)
@@ -387,6 +388,46 @@ flags and the orchestrator falls back to transcript-only continuity. The policy
 itself lives in [herrscher-contracts](https://github.com/Herrscherd/herrscher-contracts)
 (`MemoryScope`) and is applied by
 [herrscher-orchestrator](https://github.com/Herrscherd/herrscher-orchestrator).
+
+### Learning (the write side)
+
+The scope above is also the **write** axis. By default an agent only *recalls*
+durable memory; turning on **learning** lets it *grow* that memory by
+consolidating a session's work into new scoped nodes. Learning is **opt-in and
+off by default** — with no extractor configured the orchestrator stays the plain
+`Curator` and a deployment is byte-for-byte unchanged.
+
+Enable it per session at `session create` (the supervisor forwards each as a
+bridge flag, which the bridge threads into the orchestrator config):
+
+| `session create` param | bridge flag | orchestrator config key | meaning |
+| --- | --- | --- | --- |
+| `extractor` | `--extractor NAME` | `memory.extractor` | names a registered curation extractor — the switch that turns learning on |
+| `journal` | `--journal PATH` | `memory.journal` | the call journal `Consolidate` reads (worktree-relative ok) |
+| `consolidate_every` | `--consolidate-every N` | `memory.consolidate-every` | run `Consolidate` every N turns (`0` = manual only) |
+
+With an extractor named, the orchestrator becomes a `Learner`: every
+`consolidate-every` turns it runs the extractor over the journal and persists
+each candidate under the right scope — **facts** under the shared project root
+(`projects/<project>`, via `RecordShared`) and **skills** under the private agent
+root (`agents/<agent>`, via `RecordPrivate`).
+
+**No default extractor ships.** The heuristics that decide *what is worth
+remembering* are the closed part of the moat; this repo wires only the seam, so
+an empty or unknown `extractor` name fails open to the plain `Curator` (no
+learning) rather than erroring. A concrete extractor is plugged in by blank
+import.
+
+Policy:
+
+- **Multi-writer.** Shared project memory is written by *every* agent of the
+  game — an agent fleet co-curates one project graph.
+- **Collision → shared wins.** If the same key is both shared and private,
+  scoped recall surfaces the shared copy and drops the private duplicate
+  (`mergeSubgraphs`, in herrscher-contracts).
+- **Idempotent.** `Consolidate` re-runs every N turns over the same journal, but
+  a per-session `seen` set skips already-persisted keys — so re-running adds no
+  duplicate facts/skills, and is a no-op when nothing new is extracted.
 
 ---
 
