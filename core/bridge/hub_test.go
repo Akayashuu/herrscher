@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -86,6 +87,50 @@ func TestRunHubEmptyReplyStillTerminates(t *testing.T) {
 
 	if len(sink.events) == 0 || sink.events[len(sink.events)-1] != (contracts.Event{T: "reply", Done: true}) {
 		t.Fatalf("empty reply must still emit a terminal reply{done}; got %+v", sink.events)
+	}
+}
+
+// hangingBackend simulates a remote backend whose stream is lost mid-turn: the
+// first Respond emits an event then errors (the streaming proxy surfaces a
+// hangup that way); the second succeeds. It proves a stream loss ends the turn
+// cleanly via the existing reply{done} path and the next queued input is still
+// processed — the C3 abandonment guarantee, with no new abandonment path.
+type hangingBackend struct{ calls int }
+
+func (b *hangingBackend) Respond(_ context.Context, _ contracts.Prompt, onEvent func(contracts.BackendEvent)) (string, error) {
+	b.calls++
+	if b.calls == 1 {
+		onEvent(contracts.BackendEvent{Kind: "text", Detail: "partial"})
+		return "", errors.New("backend: stream ended before reply{done}")
+	}
+	return "second ok", nil
+}
+func (*hangingBackend) Close() error { return nil }
+
+func TestRunHubBackendStreamLossAbandonsTurnThenContinues(t *testing.T) {
+	sink := &recordSink{}
+	in := make(chan contracts.Event, 2)
+	in <- contracts.Event{T: "input", Text: "first"}
+	in <- contracts.Event{T: "input", Text: "second"}
+	close(in)
+
+	be := &hangingBackend{}
+	runHubTurns(context.Background(), in, sink, be, nil)
+
+	var dones []contracts.Event
+	for _, e := range sink.events {
+		if e.T == "reply" && e.Done {
+			dones = append(dones, e)
+		}
+	}
+	if len(dones) != 2 {
+		t.Fatalf("want two terminal reply{done} (turn abandoned, then next processed); got %+v", sink.events)
+	}
+	if be.calls != 2 {
+		t.Fatalf("second input must reach the recovered backend; got %d Respond calls", be.calls)
+	}
+	if dones[1].Text != "second ok" {
+		t.Fatalf("second turn reply = %q, want %q", dones[1].Text, "second ok")
 	}
 }
 

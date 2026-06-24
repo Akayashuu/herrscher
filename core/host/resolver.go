@@ -43,6 +43,7 @@ type Resolver struct {
 	attemptTimeout   time.Duration
 	dialMemory       func(context.Context, contracts.Plugin) (contracts.Memory, error)
 	dialOrchestrator func(context.Context, contracts.Plugin) (contracts.Orchestrator, error)
+	dialBackend      func(context.Context, contracts.Plugin) (contracts.Backend, error)
 	now              func() time.Time
 	sleep            func(time.Duration) <-chan time.Time
 }
@@ -60,6 +61,7 @@ func NewResolver(remote map[contracts.Category]bool, natsURL string) *Resolver {
 	}
 	r.dialMemory = r.dialRemoteMemoryOnce
 	r.dialOrchestrator = r.dialRemoteOrchestratorOnce
+	r.dialBackend = r.dialRemoteBackendOnce
 	return r
 }
 
@@ -118,6 +120,27 @@ func (r *Resolver) Orchestrator(ctx context.Context, plugins []contracts.Plugin)
 		p := p
 		return resolveRemoteWithRetry(r, ctx, contracts.CategoryOrchestrator,
 			func(c context.Context) (contracts.Orchestrator, error) { return r.dialOrchestrator(c, p) })
+	}
+	return nil, nil
+}
+
+// Backend resolves a REMOTE backend proxy when HERRSCHER_REMOTE names "backend",
+// reusing the same retry/timeout/metrics harness. Like Orchestrator it returns
+// (nil, nil) when the category is not remote, leaving the caller to build the
+// local backend (which closes over model config the resolver does not hold).
+// The remote proxy streams turn events over gRPC and surfaces a stream loss as a
+// Respond error so the turn loop abandons the in-flight turn.
+func (r *Resolver) Backend(ctx context.Context, plugins []contracts.Plugin) (contracts.Backend, error) {
+	if !r.isRemote(contracts.CategoryBackend) {
+		return nil, nil
+	}
+	for _, p := range plugins {
+		if p.Backend == nil {
+			continue
+		}
+		p := p
+		return resolveRemoteWithRetry(r, ctx, contracts.CategoryBackend,
+			func(c context.Context) (contracts.Backend, error) { return r.dialBackend(c, p) })
 	}
 	return nil, nil
 }
@@ -249,6 +272,38 @@ func (r *Resolver) dialRemoteOrchestratorOnce(ctx context.Context, _ contracts.P
 		case <-seen:
 		case <-ctx.Done():
 			return nil, fmt.Errorf("resolver: no remote orchestrator announced: %w", ctx.Err())
+		}
+	}
+}
+
+// dialRemoteBackendOnce is one remote-resolve attempt for the backend: connect to
+// NATS, watch for a backend announcement, and dial its streaming gRPC proxy. Same
+// shape as the memory/orchestrator dials; ctx bounds the announcement wait.
+func (r *Resolver) dialRemoteBackendOnce(ctx context.Context, _ contracts.Plugin) (contracts.Backend, error) {
+	nc, err := nats.Connect(r.natsURL())
+	if err != nil {
+		return nil, err
+	}
+	defer nc.Close()
+	reg := transport.NewRemoteRegistry()
+	seen := make(chan struct{}, 1)
+	if err := transport.WatchAnnouncements(nc, func(a transport.Announcement) {
+		reg.Observe(a)
+		select {
+		case seen <- struct{}{}:
+		default:
+		}
+	}); err != nil {
+		return nil, err
+	}
+	for {
+		if bes := reg.Backends(); len(bes) > 0 {
+			return transport.DialBackend(ctx, bes[0])
+		}
+		select {
+		case <-seen:
+		case <-ctx.Done():
+			return nil, fmt.Errorf("resolver: no remote backend announced: %w", ctx.Err())
 		}
 	}
 }

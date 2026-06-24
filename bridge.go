@@ -36,10 +36,22 @@ func runBridge(ctx context.Context, args []string) error {
 	consolidateEvery := fs.Int("consolidate-every", 0, "run Consolidate every N turns (0 = manual only); only used with --extractor")
 	fs.Parse(args)
 
+	log := host.Logger(*verbose).With("component", "bridge", "session", *session)
+
 	// The backend is the model edge: core never knows which model answers. The
 	// factory closes over the chosen claude config and is built per resolved
-	// channel (claude keys its persistent session on the channel id).
+	// channel (claude keys its persistent session on the channel id). When
+	// HERRSCHER_REMOTE names "backend" the resolver returns an out-of-process
+	// streaming proxy instead; otherwise it returns (nil, nil) and we build the
+	// local claude backend exactly as before.
+	br := host.NewResolver(remoteCategories(), os.Getenv("HERRSCHER_NATS"))
+	br.SetLogger(log)
 	newBackend := func(channelID string) (contracts.Backend, error) {
+		if be, err := br.Backend(ctx, contracts.Default.Backends()); err != nil {
+			return nil, err
+		} else if be != nil {
+			return be, nil
+		}
 		return claude.NewBackend(ctx, claude.Config{
 			Kind:    *backend,
 			Stream:  *stream,
@@ -49,7 +61,6 @@ func runBridge(ctx context.Context, args []string) error {
 		})
 	}
 
-	log := host.Logger(*verbose).With("component", "bridge", "session", *session)
 	mem := buildMemory(ctx, log)
 	if mem != nil {
 		defer mem.Close()

@@ -53,6 +53,14 @@ func runPluginHost(ctx context.Context, args []string) error {
 		manifest, register, closeReal = m,
 			func(s *grpc.Server) { transport.RegisterOrchestratorSkeleton(s, real) },
 			func() { _ = real.Close() }
+	case contracts.CategoryBackend:
+		real, m, err := firstBackend(ctx)
+		if err != nil {
+			return err
+		}
+		manifest, register, closeReal = m,
+			func(s *grpc.Server) { transport.RegisterBackendSkeleton(s, real) },
+			func() { _ = real.Close() }
 	default:
 		return fmt.Errorf("plugin-host: category %q passed the support gate but has no skeleton", *category)
 	}
@@ -138,4 +146,25 @@ func firstOrchestrator(ctx context.Context) (contracts.Orchestrator, contracts.M
 		return o, p.Manifest, nil
 	}
 	return nil, contracts.Manifest{}, fmt.Errorf("plugin-host: no orchestrator plugin registered")
+}
+
+// firstBackend builds the first registered backend plugin from its resolved env
+// config. The streaming skeleton forwards its per-turn event stream to remote
+// hosts, preserving ordering and the reply{done} boundary.
+func firstBackend(ctx context.Context) (contracts.Backend, contracts.Manifest, error) {
+	for _, p := range contracts.Default.Backends() {
+		if p.Backend == nil {
+			continue
+		}
+		cfg, err := contracts.Resolve(p.Manifest.Config, os.Getenv)
+		if err != nil {
+			return nil, contracts.Manifest{}, fmt.Errorf("backend plugin-host: %w", err)
+		}
+		b, err := p.Backend(ctx, cfg)
+		if err != nil {
+			return nil, contracts.Manifest{}, fmt.Errorf("backend plugin-host: %w", err)
+		}
+		return b, p.Manifest, nil
+	}
+	return nil, contracts.Manifest{}, fmt.Errorf("plugin-host: no backend plugin registered")
 }

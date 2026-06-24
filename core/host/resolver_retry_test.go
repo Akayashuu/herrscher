@@ -253,3 +253,28 @@ func TestLocalOrchestratorResolveSkipsDial(t *testing.T) {
 		t.Fatalf("local path must not dial the remote orchestrator, got %d calls", calls)
 	}
 }
+
+// TestLocalBackendResolveSkipsDial is the C3 "zero dials when local" check:
+// without backend in HERRSCHER_REMOTE, Backend returns (nil, nil) and never
+// dials, leaving the bridge to build the in-process backend.
+func TestLocalBackendResolveSkipsDial(t *testing.T) {
+	r := NewResolver(nil, "") // nothing remote
+	var calls int
+	r.dialBackend = func(context.Context, contracts.Plugin) (contracts.Backend, error) {
+		calls++
+		return nil, nil
+	}
+	be, err := r.Backend(context.Background(), []contracts.Plugin{{
+		Manifest: contracts.Manifest{Category: contracts.CategoryBackend},
+		Backend:  func(context.Context, contracts.PluginConfig) (contracts.Backend, error) { return nil, nil },
+	}})
+	if err != nil {
+		t.Fatalf("local resolve: %v", err)
+	}
+	if be != nil {
+		t.Fatalf("Backend must return (nil, nil) on the local path, got %v", be)
+	}
+	if calls != 0 {
+		t.Fatalf("local path must not dial the remote backend, got %d calls", calls)
+	}
+}
