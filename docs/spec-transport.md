@@ -33,7 +33,7 @@ release, bump `herrscher/go.mod`, and verify from `herrscher`'s tests. A stage i
 
 ---
 
-## Stage C1 — Generalize the remote category mechanism (no new category yet)
+## Stage C1 — Generalize the remote category mechanism (no new category yet) — **shipped (#20)**
 
 **Goal:** remove the `memory`-only hardcoding so adding a category is registration, not a special
 case — without yet enabling a new one. Pure refactor that keeps behavior identical.

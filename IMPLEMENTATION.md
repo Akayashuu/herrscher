@@ -8,36 +8,51 @@ agents, built on a hexagonal architecture: a narrow `herrscher-contracts` core w
 (Gateway, Backend, Memory, Orchestrator), composed at build time via blank imports. The host and core
 import zero platform-specific code — this is enforced by the purity tests.
 
-- **The remaining specs (what to build, in order):**
+- **The specs (two axes, staged):**
   - **Spec B — P1 Memory Policy (writing side):** [`docs/spec-memory-policy.md`](docs/spec-memory-policy.md)
   - **Spec C — Distribute more (remote backend/orchestrator + transport):** [`docs/spec-transport.md`](docs/spec-transport.md)
 
 ## Status
 
-`master` is healthy: agent provisioning shipped, P1 memory **read** scoping is wired, the
-remote-`memory` transport works, the full suite passes, and there are no TODO/FIXME markers.
+`master` is healthy: agent provisioning shipped, P1 memory **read** scoping is wired, learning is
+opt-in-activatable, the remote-`memory` transport works behind a generalized category registry, the
+full suite passes, and there are no TODO/FIXME markers.
 
-- **Spec A — Robustness & Observability — done.** Structured `slog` logging, exponential backoff with
-  jitter on the restart loops, remote timeouts + bounded retry, and runtime metrics on the health
-  surface are all merged.
-- **Spec B (4 stages) — remaining.** Turn the dormant `Learner` into a real, scoped consolidation
-  loop: extractor registry, journal/cadence threading, run+persist scoped facts/skills, docs.
-- **Spec C (4 stages) — remaining.** Generalize the remote-category mechanism, then remote
-  orchestrator, remote (streaming) backend, and mTLS for multi-machine.
+Per-stage status (a stage marked **done** carries its PR number in the spec header):
+
+| Spec | Stage | Status |
+|------|-------|--------|
+| A | A1–A4 — Robustness & Observability | ✅ **done** (slog, backoff+jitter, remote timeout+retry, health metrics) |
+| B | B1 — extractor registry | ✅ **done** (shipped upstream `orchestrator@v0.1.3`, doc reconciled #18) |
+| B | B2 — thread journal/cadence + `session create` activation | ✅ **done** (#19) |
+| B | **B3 — prove the write loop end to end; lock scope + idempotence** | ⬜ **TODO — next** |
+| B | **B4 — document the P1 write model** | ⬜ **TODO** |
+| C | C1 — generalize the remote-category mechanism | ✅ **done** (#20) |
+| C | **C2 — remote orchestrator** | ⬜ **TODO** |
+| C | **C3 — remote (streaming) backend** | ⬜ **TODO** |
+| C | **C4 — mTLS + configurable bind for multi-machine** | ⬜ **TODO** |
+
+**Remaining work = the five ⬜ stages. Build all of them**, in the order below, until none are left.
 
 ## Order
 
-Work the specs **in this order — B, then C** — and the stages **within each spec in order**. The
-rationale:
+Work the open stages in this exact sequence — **B3 → B4 → C2 → C3 → C4** — finishing Spec B before
+starting the rest of Spec C. The rationale:
 
-1. **Spec B first.** It is the highest product value (agents that actually learn) and is independent
-   of the transport work — it builds only on the logging already shipped in Spec A.
-2. **Spec C last.** The biggest and riskiest (a streaming remote backend, mTLS); it explicitly builds
-   on the Spec A timeout/retry/metrics seams that already exist on `master`.
+1. **Finish Spec B first (B3, then B4).** Highest product value (agents that actually learn) and nearly
+   done — B1/B2 already ship the activation, so B3 is mostly end-to-end proof and B4 is docs. Closing it
+   is cheap and unblocks confident use of learning.
+2. **Then Spec C (C2 → C3 → C4), in order.** C1 already generalized the mechanism; C2 (remote
+   orchestrator) is the straightforward request/response case, C3 (streaming backend) is the hard one,
+   and C4 (mTLS) is the cross-cutting hardening that lands last. Each builds on the Spec A
+   timeout/retry/metrics seams already on `master`.
+
+Within each spec, never skip ahead: a later stage assumes its predecessors merged.
 
 ## The loop
 
-Work **one stage at a time**, in order, across both specs (B1→B4, C1→C4). For each stage:
+Work **one stage at a time**, in the order above (B3 → B4 → C2 → C3 → C4). Do not stop after one
+stage — keep going until every ⬜ stage is merged. For each stage:
 
 ### 1. Implement the stage
 - Open a branch and a PR for that stage only.
@@ -76,8 +91,10 @@ useful comments (the ones that explain *why*). The CI bar is `gofmt -l` (no diff
 regression from a pre-existing condition and say which.
 
 ### 3. Merge and advance
-When a review pass **finds nothing real left to fix**, merge the current stage's PR and move to the
-next stage. Repeat until the last stage (C4) is done.
+When a review pass **finds nothing real left to fix**, merge the current stage's PR and immediately
+move to the next ⬜ stage in the order **B3 → B4 → C2 → C3 → C4**. Update this file's status table
+(flip the stage to ✅ with its PR number, and mark the next one **next**). Repeat until **all five**
+remaining stages are merged — the job is not done while any ⬜ remains.
 
 ## Definition of done
 
