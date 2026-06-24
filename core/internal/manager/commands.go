@@ -18,6 +18,9 @@ func (h *Handler) Commands() []contracts.Cmd {
 			Param("terminal_only", "bind the session to the terminal gateway only", false).
 			Param("shared", "run in the main checkout instead of an isolated worktree", false).
 			Param("agent", "provision the session from a durable agent (its persona + MCP + zero-prompt settings)", false).
+			Param("extractor", "name a registered curation extractor to enable the P1 learning loop (empty = no learning)", false).
+			Param("journal", "call-journal path Consolidate reads (worktree-relative ok); only used with extractor", false).
+			Param("consolidate_every", "run Consolidate every N turns (0 = manual only); only used with extractor", false).
 			Do(h.sessionCreateRun),
 		contracts.New("session", "close").
 			Help("close a session: stop the bridge, remove the worktree, archive the channel").

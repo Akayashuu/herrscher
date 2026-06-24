@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	contracts "github.com/Herrscherd/herrscher-contracts"
@@ -67,6 +68,19 @@ func (h *Handler) sessionCreateRun(ctx context.Context, in contracts.Input) (str
 		backend = "stream" // default backend: persistent claude stream-json
 	}
 	agentName, _ := in.Lookup("agent")
+	// P1 learning (opt-in): extractor names a registered curation extractor; the
+	// journal/cadence feed its Consolidate. Persisted on the session and threaded
+	// to the bridge by the supervisor, like project/agent scope.
+	extractor, _ := in.Lookup("extractor")
+	journal, _ := in.Lookup("journal")
+	consolidateEvery := 0
+	if v, ok := in.Lookup("consolidate_every"); ok && v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return "", fmt.Errorf("invalid consolidate_every %q — use a non-negative integer", v)
+		}
+		consolidateEvery = n
+	}
 	gwList, _ := in.Lookup("gateways")
 	gateways := ParseGateways(gwList, in.Bool("terminal_only"))
 	ws := h.st.WorkspaceRoot()
@@ -137,14 +151,14 @@ func (h *Handler) sessionCreateRun(ctx context.Context, in contracts.Input) (str
 			rollbackWorktree()
 			return "", fmt.Errorf("create channel: %v", err)
 		}
-		sess = state.Session{Name: name, ChannelID: chID, Type: "text", Cmd: cmd, Backend: backend, Worktree: worktree, Project: project, Agent: agentName, Gateways: gateways}
+		sess = state.Session{Name: name, ChannelID: chID, Type: "text", Cmd: cmd, Backend: backend, Worktree: worktree, Project: project, Agent: agentName, Gateways: gateways, Extractor: extractor, Journal: journal, ConsolidateEvery: consolidateEvery}
 	case "forum":
 		chID, err := h.d.ForumPost(ctx, home.ID, title, "Session **"+title+"** started.")
 		if err != nil {
 			rollbackWorktree()
 			return "", fmt.Errorf("create forum post: %v", err)
 		}
-		sess = state.Session{Name: name, ChannelID: chID, Type: "forum", Cmd: cmd, Backend: backend, Worktree: worktree, Project: project, Agent: agentName, Gateways: gateways}
+		sess = state.Session{Name: name, ChannelID: chID, Type: "forum", Cmd: cmd, Backend: backend, Worktree: worktree, Project: project, Agent: agentName, Gateways: gateways, Extractor: extractor, Journal: journal, ConsolidateEvery: consolidateEvery}
 	default:
 		return "", fmt.Errorf("home type %q unsupported", home.Type)
 	}

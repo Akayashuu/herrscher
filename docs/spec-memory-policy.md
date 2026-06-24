@@ -75,23 +75,23 @@ heuristics live entirely in the closed module. The host-side stages below theref
 **Goal:** give the Learner its inputs. The bridge must pass a journal path and a cadence so
 `Consolidate()` has something to read and a trigger to run.
 
-**Scope** (`herrscher/bridge.go`, `core/internal/supervisor`, `core/internal/state` if a field is
-needed)
-- Resolve a per-session journal path (e.g. `<worktree>/.neublox/calls.log`, or a configurable
-  `--journal` flag defaulting to a documented path) and thread it into the orchestrator config as
-  `memory.journal`, alongside `memory.extractor` and `memory.consolidate-every` (read by
-  `herrscher-orchestrator/register.go:32`).
-- The supervisor propagates any new flag the same way it already propagates `--project`/`--agent`
-  (`supervisor.go:24-38`) — only when set, preserving backward compatibility.
-- When `memory.extractor` is unset, behavior is exactly as today (plain `Curator`, no learning) — this
-  must remain the default so existing deployments are unaffected.
+**Scope** (`herrscher/bridge.go`, `core/internal/manager`, `core/internal/supervisor`,
+`core/internal/state`)
+- Add `extractor` / `journal` / `consolidate_every` params to `session create` and persist them on
+  `state.Session` (`Extractor` / `Journal` / `ConsolidateEvery`) — the user-facing way to turn learning
+  on. `consolidate_every` is validated as a non-negative integer.
+- The supervisor propagates `--extractor`/`--journal`/`--consolidate-every` to the child bridge the
+  same way it already propagates `--project`/`--agent` (`supervisor.go`) — only when set.
+- The bridge threads them into the orchestrator config as `memory.extractor`, `memory.journal`, and
+  `memory.consolidate-every` (read by `herrscher-orchestrator/register.go`).
+- When `extractor` is unset, behavior is exactly as today (plain `Curator`, no learning) — this is the
+  default, so existing deployments are byte-for-byte unaffected.
 
 **Acceptance / tests**
-- With `memory.extractor` + `memory.journal` set, `buildOrchestrator` constructs a `Learner`-backed
-  orchestrator; with them unset it constructs the plain scoped `Curator` (assert the concrete type or
-  an observable behavior difference).
-- The supervisor includes the new flag in the child bridge args only when the session has it set
-  (extends the existing `bridgeArgs` table test).
+- `session create` with `extractor`/`journal`/`consolidate_every` persists them on the Session; a bad
+  `consolidate_every` is rejected (`session_learning_test.go`).
+- `buildOrchestrator` puts the three keys into the config bag only when set (`bridge_test.go`); the
+  supervisor includes the flags in the child argv only when set (`supervisor_test.go`).
 - Full `herrscher` suite + purity tests green.
 
 ---
