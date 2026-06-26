@@ -10,3 +10,7 @@
 # local secrets, auto-loaded at startup (see .env.example)
 /.env
 .superpowers/
+
+# local-dev Go workspace (resolves the unmerged gateway branch); never committed
+/go.work
+/go.work.sum

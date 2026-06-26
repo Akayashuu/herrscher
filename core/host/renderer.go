@@ -2,112 +2,65 @@ package host
 
 import (
 	"context"
-	"strings"
-	"time"
 
 	contracts "github.com/Herrscherd/herrscher-contracts"
 )
 
-// nowFunc lets tests pin the progress view's clock.
-var nowFunc = time.Now
-
-// gatewayMaxLen is the hard per-message limit for chunking (Discord's 2000).
+// gatewayMaxLen is the hard per-message chunk limit for gateways that do not
+// render themselves. Rich, gateway-specific rendering (progress, emojis, edit
+// throttling) lives in the gateway behind contracts.EventSink.
 const gatewayMaxLen = 2000
 
-// gatewayRenderer reproduces, on the daemon side, the rich gateway rendering the
-// bridge used to do inline: a live progress view fed by status/chunk events and a
-// threaded final reply. It uses only the contracts Gateway/ChannelReader ports,
-// so the hub wraps any gateway that does NOT implement EventSink in one of these.
+// gatewayRenderer is the minimal fallback for a gateway that does NOT implement
+// EventSink: it posts only the final reply through the Gateway port, chunked.
 type gatewayRenderer struct {
-	gw       contracts.Gateway
-	reader   contracts.ChannelReader
-	ch       string
-	progress string
-	conv     contracts.Conversation
-	pv       *progressView
+	gw   contracts.Gateway
+	conv contracts.Conversation
 }
 
-func newGatewayRenderer(gw contracts.Gateway, reader contracts.ChannelReader, ch, progress string) *gatewayRenderer {
-	if progress == "" {
-		progress = "full"
-	}
+func newGatewayRenderer(gw contracts.Gateway, ch string) *gatewayRenderer {
 	return &gatewayRenderer{
-		gw:       gw,
-		reader:   reader,
-		ch:       ch,
-		progress: progress,
-		conv:     contracts.Conversation{Gateway: gw.Manifest().Kind, ID: ch},
+		gw:   gw,
+		conv: contracts.Conversation{Gateway: gw.Manifest().Kind, ID: ch},
 	}
 }
 
-// handle renders one turn event onto the gateway. human opens a progress view;
-// status/chunk feed it; reply finishes it and posts the result.
+// handle posts the final reply; all other event kinds are ignored.
 func (r *gatewayRenderer) handle(ctx context.Context, e contracts.Event) {
-	switch e.T {
-	case "human":
-		if r.progress != "off" && r.reader != nil {
-			post := func(id, content string) (string, error) {
-				return r.reader.UpsertStatusMessage(ctx, r.ch, id, content)
-			}
-			r.pv = newProgressView(post, r.progress, false, nowFunc())
-		}
-	case "status":
-		if r.pv != nil {
-			tool, detail := splitTool(e.Text)
-			r.pv.add(contracts.BackendEvent{Kind: "tool", Tool: tool, Detail: detail})
-		}
-	case "chunk":
-		if r.pv != nil {
-			r.pv.add(contracts.BackendEvent{Kind: "text", Detail: e.Text})
-		}
-	case "reset":
-		if r.pv != nil {
-			r.pv.finish(true)
-			r.pv = nil
-		}
-	case "reply":
-		if e.Done {
-			if e.Text != "" {
-				for _, part := range chunk(e.Text, gatewayMaxLen) {
-					_, _ = r.gw.Post(ctx, r.conv, part)
-				}
-			}
-			if r.pv != nil {
-				if e.Cost > 0 {
-					r.pv.add(contracts.BackendEvent{Kind: "result", Cost: e.Cost})
-				}
-				r.pv.finish(false)
-				r.pv = nil
-			}
-		}
+	if e.T != "reply" || !e.Done || e.Text == "" {
+		return
+	}
+	for _, part := range chunk(e.Text, gatewayMaxLen) {
+		_, _ = r.gw.Post(ctx, r.conv, part)
 	}
 }
 
-// splitTool recovers the tool name and detail from a status line the bridge
-// emitted as "Tool Detail" (see bridge.emitBackendEvent), so the progress view
-// can group and icon by tool name rather than collapsing everything under "".
-func splitTool(s string) (tool, detail string) {
-	s = strings.TrimSpace(s)
-	if i := strings.IndexByte(s, ' '); i >= 0 {
-		return s[:i], strings.TrimSpace(s[i+1:])
-	}
-	return s, ""
-}
-
-// chunk splits s into pieces no longer than max, preferring to break on a
-// newline boundary so multi-line command output stays readable.
+// chunk splits s into pieces of at most max runes, preferring a newline break
+// within the limit so multi-line output stays readable. It counts and slices in
+// rune space (a single []rune pass, not a per-iteration byte scan) so multibyte
+// UTF-8 (e.g. accented French text) is never split into invalid bytes and the
+// limit is honoured in characters. This mirrors the gateway sink's chunker.
 func chunk(s string, max int) []string {
 	var out []string
-	for len(s) > max {
+	r := []rune(s)
+	for len(r) > max {
 		cut := max
-		if nl := strings.LastIndexByte(s[:max], '\n'); nl > max/2 {
-			cut = nl
+		// Prefer the last newline within the limit, but only past the halfway
+		// point so a stray early newline does not yield tiny chunks.
+		for i := max - 1; i > max/2; i-- {
+			if r[i] == '\n' {
+				cut = i
+				break
+			}
 		}
-		out = append(out, s[:cut])
-		s = strings.TrimPrefix(s[cut:], "\n")
+		out = append(out, string(r[:cut]))
+		r = r[cut:]
+		if len(r) > 0 && r[0] == '\n' {
+			r = r[1:]
+		}
 	}
-	if s != "" {
-		out = append(out, s)
+	if len(r) > 0 {
+		out = append(out, string(r))
 	}
 	return out
 }

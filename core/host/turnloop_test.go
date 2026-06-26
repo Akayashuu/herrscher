@@ -23,8 +23,6 @@ type fanRecorder struct {
 	statuses    []string // content of each UpsertStatusMessage (the live progress view)
 	sink        bool     // implements EventSink when true
 	readChannel string   // last channel id passed to Read
-	reactions   bool     // advertises the Reactions capability when true
-	reacts      []string // "<msgID>:<emoji>" for each React call
 }
 
 func (f *fanRecorder) feed(text string) {
@@ -59,9 +57,7 @@ func (f *fanRecorder) UpsertStatusMessage(_ context.Context, _, _, content strin
 	f.statuses = append(f.statuses, content)
 	return "", nil
 }
-func (f *fanRecorder) Manifest() contracts.Manifest {
-	return contracts.Manifest{Kind: "rec", Capabilities: contracts.Capabilities{Reactions: f.reactions}}
-}
+func (f *fanRecorder) Manifest() contracts.Manifest { return contracts.Manifest{Kind: "rec"} }
 func (f *fanRecorder) Post(_ context.Context, _ contracts.Conversation, text string) (contracts.MessageID, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -71,10 +67,7 @@ func (f *fanRecorder) Post(_ context.Context, _ contracts.Conversation, text str
 func (f *fanRecorder) Reply(_ context.Context, _ contracts.Conversation, _ contracts.MessageID, text string) (contracts.MessageID, error) {
 	return f.Post(nil, contracts.Conversation{}, text)
 }
-func (f *fanRecorder) React(_ context.Context, _ contracts.Conversation, msg contracts.MessageID, emoji string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.reacts = append(f.reacts, string(msg)+":"+emoji)
+func (f *fanRecorder) React(context.Context, contracts.Conversation, contracts.MessageID, string) error {
 	return nil
 }
 func (f *fanRecorder) Menu(context.Context, contracts.Conversation, contracts.MessageID, string, []contracts.Choice) error {
@@ -151,47 +144,11 @@ func TestDriverPollsSessionChannel(t *testing.T) {
 	}, "driver polls the session's own channel, not the gateway default")
 }
 
-// TestDriverReactsOnReceiveAndComplete proves the driver acknowledges a human
-// message with 👀 when it is received and ✅ once its turn completes, on a gateway
-// that advertises the Reactions capability.
-func TestDriverReactsOnReceiveAndComplete(t *testing.T) {
-	a := &fanRecorder{reactions: true}
-	a.feed("hi")
-	toBridge := make(chan contracts.Event, 4)
-	fromBridge := make(chan contracts.Event, 4)
-	d := newSessionDriver("s1", []contracts.GatewaySet{{Gateway: a, Reader: a}}, toBridge, fromBridge)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go d.run(ctx)
-
-	hasReact := func(want string) bool {
-		a.mu.Lock()
-		defer a.mu.Unlock()
-		for _, r := range a.reacts {
-			if r == want {
-				return true
-			}
-		}
-		return false
-	}
-
-	waitFor(t, func() bool { return hasReact("m:" + reactSeen) }, "👀 reaction on receive")
-
-	select {
-	case <-toBridge:
-	case <-time.After(time.Second):
-		t.Fatal("driver did not pump input to bridge")
-	}
-	fromBridge <- contracts.Event{T: "reply", Text: "ok", Done: true}
-
-	waitFor(t, func() bool { return hasReact("m:" + reactDone) }, "✅ reaction on completion")
-}
-
-// TestDriverProgressViewOpensAtTurnStart proves the non-EventSink renderer opens
-// its live progress view at turn start (driven by the synthesized "human" event),
-// so a mid-turn status renders before the final reply is posted.
-func TestDriverProgressViewOpensAtTurnStart(t *testing.T) {
+// TestDriverNonEventSinkPostsOnlyFinalReply proves that a gateway that does NOT
+// implement EventSink receives only the final reply through Post: mid-turn
+// status/chunk events render nothing on the host side (rendering is now the
+// gateway's job behind EventSink).
+func TestDriverNonEventSinkPostsOnlyFinalReply(t *testing.T) {
 	a := &fanRecorder{}
 	a.feed("hello")
 	toBridge := make(chan contracts.Event, 4)
@@ -210,8 +167,54 @@ func TestDriverProgressViewOpensAtTurnStart(t *testing.T) {
 	waitFor(t, func() bool {
 		a.mu.Lock()
 		defer a.mu.Unlock()
-		return a.upserts > 0 && len(a.posted) == 1 && a.posted[0] == "world"
-	}, "progress view opened (upserts>0) and final reply posted")
+		return len(a.posted) == 1 && a.posted[0] == "world"
+	}, "final reply posted")
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.upserts != 0 || len(a.statuses) != 0 {
+		t.Fatalf("non-EventSink gateway must not render progress; upserts=%d statuses=%v", a.upserts, a.statuses)
+	}
+}
+
+// TestDriverEmitsAbandonedOnHangup proves that when an in-flight turn is
+// abandoned (the bridge connection drops), the host fans an abstract "abandoned"
+// signal to EventSink gateways so they can finalize their live acknowledgement.
+// The host emits no emoji/reaction itself — presentation is the gateway's job.
+func TestDriverEmitsAbandonedOnHangup(t *testing.T) {
+	a := &fanRecorder{}    // input source (non-sink)
+	rec := &sinkRecorder{} // EventSink gateway: receives the full stream
+	a.feed("hello")
+
+	toBridge := make(chan contracts.Event, 4)
+	fromBridge := make(chan contracts.Event, 4)
+	d := newSessionDriver("s1",
+		[]contracts.GatewaySet{{Gateway: a, Reader: a}, {Gateway: rec, Reader: rec}},
+		toBridge, fromBridge)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go d.run(ctx)
+
+	// The turn opens (human) and the input is handed to the bridge.
+	if got := <-toBridge; got.T != "input" || got.Text != "hello" {
+		t.Fatalf("driver wrote %+v, want input/hello", got)
+	}
+	// The bridge connection drops mid-turn: the driver abandons the turn.
+	d.hangup <- struct{}{}
+
+	waitFor(t, func() bool {
+		rec.mu.Lock()
+		defer rec.mu.Unlock()
+		n := len(rec.emitted)
+		return n >= 2 && rec.emitted[0].T == "human" && rec.emitted[n-1].T == "abandoned"
+	}, "abandoned signal fanned to the EventSink gateway")
+
+	// A non-EventSink gateway posts nothing for an abandoned turn (no final reply).
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.posted) != 0 {
+		t.Fatalf("non-EventSink gateway must post nothing on abandon; got %v", a.posted)
+	}
 }
 
 // TestDriverPickForwardsWithoutOpeningTurn proves Pick enqueues a pick frame

@@ -139,12 +139,18 @@ conversation-policy port; the default stack ships the published
 `herrscher-orchestrator` module (the `basic` kind). Every plugin plugs in the
 same way — a blank import and a rebuild, no domain change.
 
-Gateways come in two flavours. A plain gateway exposes only the read/post ports
-and is driven by the host-side renderer. A **smart gateway** also implements
-`EventSink` and renders the live turn stream itself — the in-tree **`terminal`**
-gateway (`plugins/terminal`) is one: a Bubbletea TUI that `serve` brings up in
-the foreground as a first-class peer of Discord, so the terminal is a real
-gateway, not a debug console.
+Gateways come in two flavours. A plain gateway exposes only the read/post ports;
+for it the host posts **only the final reply** (chunked), with no platform-
+specific dressing. A **smart gateway** also implements `EventSink`, receives the
+raw turn-event stream, and renders it itself (live progress, emojis, summary).
+Both shipped gateways are smart: the in-tree **`terminal`** gateway
+(`plugins/terminal`) is a Bubbletea TUI that `serve` brings up in the foreground
+as a first-class peer of Discord, and the **Discord** gateway renders its own
+progress message, ⏳ acknowledgement, and summary via DCTL. Rich, platform-
+specific presentation lives in the gateway — never in the host: the host only
+emits **abstract semantic events** (turn received, reply, mid-turn reset, and an
+`abandoned` signal when a turn ends without a reply), and each gateway decides
+how to display them. The host never picks an emoji or reaction itself.
 
 ```mermaid
 flowchart LR
@@ -220,19 +226,20 @@ sequenceDiagram
         M-->>BE: tool calls · text · cost
         BE-->>BR: onEvent(BackendEvent)
         BR-->>HUB: chunk / status events
-        HUB->>GW: fan out to every bound gateway<br/>(EventSink renders itself; others via host renderer)
+        HUB->>GW: fan out to every bound gateway<br/>(smart gateway renders itself; plain gateway gets the final reply only)
     end
     M-->>BE: final answer (+ total cost)
     BE-->>BR: output string
     BR-->>HUB: reply{Done:true, Cost}
-    HUB->>GW: post final reply (split to 2000 chars)<br/>+ cost in the progress summary
+    HUB->>GW: deliver reply event<br/>(smart: rendered in-gateway; plain: posted, split to 2000)
     GW->>CH: shows the reply
     Note over HUB: turn ends → next FIFO input may start
 ```
 
-A **smart gateway** (the terminal) implements `EventSink` and renders the live
-event stream itself; a non-`EventSink` gateway (Discord) is driven by the
-host-side renderer, which posts the enriched progress message and final reply.
+A **smart gateway** (both Discord and the terminal) implements `EventSink` and
+renders the live event stream itself — progress, emojis, and a cost summary. For
+a plain gateway the host only posts the final reply, chunked; it adds no
+platform-specific presentation, keeping the host gateway-agnostic.
 
 If the model hits a permission prompt mid-turn, the backend exposes a
 `PendingChoice`; when the `MenuRouter` capability is present, the gateway posts a

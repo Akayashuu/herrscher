@@ -16,24 +16,6 @@ import (
 // inbound lines.
 var pollInterval = 50 * time.Millisecond
 
-// Acknowledgement reactions the driver places on a human message so the operator
-// sees, in Discord itself, that the bot received it (👀), answered it (✅), or
-// abandoned the turn (❌). Best-effort and only on gateways advertising Reactions.
-const (
-	reactSeen  = "👀"
-	reactDone  = "✅"
-	reactError = "❌"
-)
-
-// inbound is one queued frame plus where to acknowledge it with reactions. msg is
-// empty for picks (which carry no human message to react on).
-type inbound struct {
-	ev   contracts.Event
-	conv contracts.Conversation
-	gw   contracts.Gateway
-	msg  contracts.MessageID
-}
-
 // sessionDriver owns one session's turn lifecycle: it polls every bound
 // gateway's Reader for inbound messages, serializes them through a FIFO, writes
 // one input frame to the bridge per turn, and fans the bridge's reply events out
@@ -49,7 +31,7 @@ type sessionDriver struct {
 	gateways  []contracts.GatewaySet
 	toBridge  chan<- contracts.Event
 	from      <-chan contracts.Event
-	queue     chan inbound
+	queue     chan contracts.Event
 	renderers map[string]*gatewayRenderer
 
 	// hangup signals that the current connection ended so an in-flight turn is
@@ -74,7 +56,7 @@ func newSessionDriver(name string, gws []contracts.GatewaySet, toBridge chan<- c
 		gateways:  gws,
 		toBridge:  toBridge,
 		from:      fromBridge,
-		queue:     make(chan inbound, 64),
+		queue:     make(chan contracts.Event, 64),
 		renderers: map[string]*gatewayRenderer{},
 		hangup:    make(chan struct{}, 1),
 		seen:      map[string]bool{},
@@ -99,7 +81,7 @@ func (d *sessionDriver) journal(authorID string) {
 // Pick injects a routed select-menu value into this session's turn queue. The
 // bridge answers it out-of-band (serialized with turns) and emits a reply.
 func (d *sessionDriver) Pick(value string) {
-	d.queue <- inbound{ev: contracts.Event{T: "pick", Value: value}}
+	d.queue <- contracts.Event{T: "pick", Value: value}
 }
 
 // sessionRegistry maps live session names to their driver so an out-of-band
@@ -139,20 +121,17 @@ func Pick(session, value string) bool {
 func (d *sessionDriver) run(ctx context.Context) {
 	for _, g := range d.gateways {
 		if g.Reader != nil {
-			go d.poll(ctx, g)
+			go d.poll(ctx, g.Reader)
 		}
 	}
 	d.pump(ctx)
 }
 
 // poll reads one gateway's inbound messages and enqueues them as input frames.
-func (d *sessionDriver) poll(ctx context.Context, g contracts.GatewaySet) {
-	r := g.Reader
-	conv := contracts.Conversation{Gateway: g.Gateway.Manifest().Kind, ID: d.channel}
+func (d *sessionDriver) poll(ctx context.Context, r contracts.ChannelReader) {
 	ch := d.channel
 	if ch == "" {
 		ch = r.DefaultChannel()
-		conv.ID = ch
 	}
 	var last string
 	// With a session channel bound, start after the current history so a daemon
@@ -174,15 +153,8 @@ func (d *sessionDriver) poll(ctx context.Context, g contracts.GatewaySet) {
 				}
 				last = m.ID
 				d.journal(m.AuthorID)
-				// 👀: the message is received and queued; ✅/❌ follows when its turn ends.
-				d.react(ctx, g.Gateway, conv, contracts.MessageID(m.ID), reactSeen)
 				select {
-				case d.queue <- inbound{
-					ev:   contracts.Event{T: "input", Who: m.AuthorName, Text: m.Content},
-					conv: conv,
-					gw:   g.Gateway,
-					msg:  contracts.MessageID(m.ID),
-				}:
+				case d.queue <- contracts.Event{T: "input", Who: m.AuthorName, Text: m.Content}:
 				case <-ctx.Done():
 					return
 				}
@@ -203,13 +175,13 @@ func (d *sessionDriver) pump(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case item := <-d.queue:
+		case ev := <-d.queue:
 			// A pick is answered out-of-band by the bridge; only a real input
 			// opens a turn (and a progress view) on the bound gateways.
-			if item.ev.T == "input" {
-				d.fanOut(ctx, contracts.Event{T: "human", Who: item.ev.Who, Text: item.ev.Text})
+			if ev.T == "input" {
+				d.fanOut(ctx, contracts.Event{T: "human", Who: ev.Who, Text: ev.Text})
 			}
-			d.runTurn(ctx, item)
+			d.runTurn(ctx, ev)
 		}
 	}
 }
@@ -218,45 +190,42 @@ func (d *sessionDriver) pump(ctx context.Context) {
 // reply{done}. A stale hangup left by a disconnect that happened between turns is
 // drained first so it cannot abort this turn; the send then races the hangup so a
 // disconnect before the frame is handed off abandons the turn instead of blocking.
-func (d *sessionDriver) runTurn(ctx context.Context, item inbound) {
+// A turn that ends without a reply (bridge disconnect or shutdown) emits an
+// abstract "abandoned" signal so EventSink gateways can finalize.
+func (d *sessionDriver) runTurn(ctx context.Context, ev contracts.Event) {
 	select {
 	case <-d.hangup:
 	default:
 	}
 	select {
-	case d.toBridge <- item.ev:
+	case d.toBridge <- ev:
 	case <-d.hangup:
-		d.ack(ctx, item, false)
+		d.abandon(ctx, ev)
 		return
 	case <-ctx.Done():
+		d.abandon(ctx, ev)
 		return
 	}
-	d.ack(ctx, item, d.awaitTurn(ctx))
+	if !d.awaitTurn(ctx) {
+		d.abandon(ctx, ev)
+	}
 }
 
-// react places one emoji on a human message, best-effort, and only when the
-// gateway advertises the Reactions capability (so a non-reacting gateway — the
-// terminal — is skipped without error).
-func (d *sessionDriver) react(ctx context.Context, gw contracts.Gateway, conv contracts.Conversation, msg contracts.MessageID, emoji string) {
-	if gw == nil || msg == "" || !gw.Manifest().Capabilities.Reactions {
+// abandon fans an abstract "abandoned" signal for a real input turn that ended
+// without a reply, so EventSink gateways can finalize their live acknowledgement
+// (clear the pending marker, post nothing, whatever they choose). The host stays
+// presentation-agnostic: it never picks an emoji or reaction — each gateway
+// renders the signal however it wants. Picks carry no turn to abandon.
+func (d *sessionDriver) abandon(ctx context.Context, ev contracts.Event) {
+	if ev.T != "input" {
 		return
 	}
-	_ = gw.React(ctx, conv, msg, emoji)
-}
-
-// ack marks a handled human message with a terminal reaction: ✅ when the turn
-// completed, ❌ when it was abandoned. Picks (no msg) are skipped.
-func (d *sessionDriver) ack(ctx context.Context, item inbound, completed bool) {
-	emoji := reactDone
-	if !completed {
-		emoji = reactError
-	}
-	d.react(ctx, item.gw, item.conv, item.msg, emoji)
+	d.fanOut(ctx, contracts.Event{T: "abandoned"})
 }
 
 // awaitTurn fans every event for the current turn to all bound gateways and
-// returns when it sees reply{done} (or ctx is cancelled, the bridge closed, or a
-// hangup signals the in-flight turn was abandoned on a bridge disconnect). A
+// returns true on reply{done}, or false when the turn is abandoned (ctx
+// cancelled, the bridge closed, or a hangup signals a bridge disconnect). A
 // backend "reset" is a mid-turn progress event: it is fanned out and the turn
 // continues.
 func (d *sessionDriver) awaitTurn(ctx context.Context) bool {
@@ -284,9 +253,10 @@ func (d *sessionDriver) awaitTurn(ctx context.Context) bool {
 }
 
 // fanOut delivers one turn event to every bound gateway: a gateway implementing
-// EventSink renders the full stream itself; otherwise only the final reply is
-// posted through the Gateway port (the host renderer added in M5 enriches the
-// non-EventSink path).
+// EventSink renders the full stream itself (progress, emojis, acknowledgements,
+// summary); a gateway that does not gets only the final reply posted through the
+// Gateway port, chunked. All rich, platform-specific rendering lives in the
+// gateway — the host only emits abstract semantic events.
 func (d *sessionDriver) fanOut(ctx context.Context, e contracts.Event) {
 	for i, g := range d.gateways {
 		if sink, ok := g.Gateway.(contracts.EventSink); ok {
@@ -296,7 +266,7 @@ func (d *sessionDriver) fanOut(ctx context.Context, e contracts.Event) {
 		key := strconv.Itoa(i) + ":" + g.Gateway.Manifest().Kind
 		r := d.renderers[key]
 		if r == nil {
-			r = newGatewayRenderer(g.Gateway, g.Reader, d.renderChannel(g), "full")
+			r = newGatewayRenderer(g.Gateway, d.renderChannel(g))
 			d.renderers[key] = r
 		}
 		r.handle(ctx, e)
