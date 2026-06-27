@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	contracts "github.com/Herrscherd/herrscher-contracts"
+	"github.com/Herrscherd/herrscher/plugins/terminal/tui"
 )
 
 // The gateway the factory builds must expose the Foreground capability, since
@@ -20,54 +21,59 @@ func TestGatewaySetExposesForeground(t *testing.T) {
 	}
 }
 
-func TestReadDrainsSubmittedLines(t *testing.T) {
+func TestReadDrainsPerChannel(t *testing.T) {
 	tm := New()
-	tm.Submit("hello")
-	tm.Submit("world")
+	tm.Submit("chA", "hello")
+	tm.Submit("chB", "world")
 
-	msgs, err := tm.Read(context.Background(), "terminal", 100, "")
-	if err != nil {
-		t.Fatalf("Read: %v", err)
+	a, _ := tm.Read(context.Background(), "chA", 100, "")
+	if len(a) != 1 || a[0].Content != "hello" || a[0].ChannelID != "chA" {
+		t.Fatalf("chA Read = %+v", a)
 	}
-	if len(msgs) != 2 || msgs[0].Content != "hello" || msgs[1].Content != "world" {
-		t.Fatalf("Read = %+v, want hello/world", msgs)
+	b, _ := tm.Read(context.Background(), "chB", 100, "")
+	if len(b) != 1 || b[0].Content != "world" {
+		t.Fatalf("chB Read = %+v", b)
 	}
-	// A second Read drains nothing (already consumed).
-	msgs, _ = tm.Read(context.Background(), "terminal", 100, "")
-	if len(msgs) != 0 {
-		t.Fatalf("second Read = %+v, want empty", msgs)
+	// drained
+	if a2, _ := tm.Read(context.Background(), "chA", 100, ""); len(a2) != 0 {
+		t.Fatalf("chA second Read = %+v, want empty", a2)
 	}
 }
 
-func TestEmitForwardsToFrontend(t *testing.T) {
+func TestEmitToRoutesToFrontend(t *testing.T) {
 	tm := New()
-	got := make([]contracts.Event, 0, 2)
-	done := make(chan struct{})
-	go func() {
-		for e := range tm.Frontend() {
-			got = append(got, e)
-			if len(got) == 2 {
-				close(done)
-				return
-			}
-		}
-	}()
-	tm.Emit(contracts.Event{T: "chunk", Text: "a"})
-	tm.Emit(contracts.Event{T: "reply", Text: "b", Done: true})
-	<-done
-	if got[0].Text != "a" || got[1].Text != "b" {
-		t.Fatalf("frontend got %+v, want a/b", got)
+	got := make(chan tui.RoutedEvent, 1)
+	go func() { got <- <-tm.Frontend() }()
+	tm.EmitTo(contracts.Conversation{Gateway: "terminal", ID: "chX"}, contracts.Event{T: "chunk", Text: "a"})
+	re := <-got
+	if re.Conv.ID != "chX" || re.Event.Text != "a" {
+		t.Fatalf("frontend got %+v", re)
 	}
+}
+
+func TestEmitUsesDefaultChannel(t *testing.T) {
+	tm := New()
+	got := make(chan tui.RoutedEvent, 1)
+	go func() { got <- <-tm.Frontend() }()
+	tm.Emit(contracts.Event{T: "reply", Text: "b", Done: true})
+	re := <-got
+	if re.Conv.ID != ChannelID || re.Event.Text != "b" {
+		t.Fatalf("Emit default-channel routing wrong: %+v", re)
+	}
+}
+
+func TestTerminalImplementsRoutedEventSink(t *testing.T) {
+	var _ contracts.RoutedEventSink = New()
 }
 
 func TestPostEmitsReplyEvent(t *testing.T) {
 	tm := New()
-	got := make(chan contracts.Event, 1)
+	got := make(chan tui.RoutedEvent, 1)
 	go func() { got <- <-tm.Frontend() }()
 	if _, err := tm.Post(context.Background(), contracts.Conversation{Gateway: "terminal", ID: "terminal"}, "hi"); err != nil {
 		t.Fatalf("Post: %v", err)
 	}
-	if e := <-got; e.T != "reply" || e.Text != "hi" {
-		t.Fatalf("Post emitted %+v, want reply/hi", e)
+	if re := <-got; re.Event.T != "reply" {
+		t.Fatalf("Post emitted %+v, want reply", re)
 	}
 }

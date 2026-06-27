@@ -18,14 +18,21 @@ import (
 	contracts "github.com/Herrscherd/herrscher-contracts"
 )
 
+// RoutedEvent is a turn event tagged with the conversation (session channel) it
+// belongs to, so the TUI can route it to the right tab.
+type RoutedEvent struct {
+	Conv  contracts.Conversation
+	Event contracts.Event
+}
+
 // Backend is the narrow view of the terminal gateway the TUI drives: it reads
-// outbound events to render and submits the lines the operator types. Taking an
-// interface (rather than the concrete gateway) keeps this package free of any
-// dependency on the terminal plugin, so the gateway can own its frontend without
-// an import cycle.
+// routed outbound events to render, submits the lines the operator types into a
+// specific channel, and enumerates the hub's sessions for tab labels. Taking an
+// interface keeps this package free of any dependency on the terminal plugin.
 type Backend interface {
-	Frontend() <-chan contracts.Event
-	Submit(text string)
+	Frontend() <-chan RoutedEvent
+	Submit(channel, text string)
+	Sessions() []contracts.SessionInfo
 }
 
 var (
@@ -66,7 +73,7 @@ func Run(ctx context.Context, cancel context.CancelFunc, tm Backend) error {
 				if !ok {
 					return
 				}
-				p.Send(eventMsg(e))
+				p.Send(eventMsg(e.Event))
 			}
 		}
 	}()
@@ -96,7 +103,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyEnter:
 			text := strings.TrimSpace(m.input.Value())
 			if text != "" {
-				m.tm.Submit(text)
+				m.tm.Submit("terminal", text) // channel fixed until Task 4 (multi-tab model)
 				m.append(humanStyle.Render("you ") + text)
 				m.input.Reset()
 			}

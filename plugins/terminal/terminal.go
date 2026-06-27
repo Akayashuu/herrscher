@@ -35,21 +35,26 @@ func newGatewaySet(ctx context.Context, cfg contracts.PluginConfig) (contracts.G
 	return contracts.GatewaySet{Gateway: tm, Reader: tm}, nil
 }
 
-// Terminal is the in-process terminal gateway. Typed lines arrive via Submit and
-// are drained by the hub through Read; outbound events (Emit/Post/Reply) are
-// forwarded to the TUI on Frontend.
+// Terminal is the in-process terminal gateway. Typed lines arrive via Submit
+// (tagged with the active channel) and are drained per-channel by the hub
+// through Read; outbound events (EmitTo/Emit/Post/Reply) are forwarded to the
+// TUI as RoutedEvents on Frontend.
 type Terminal struct {
 	mu      sync.Mutex
-	pending []contracts.Message
+	pending map[string][]contracts.Message // channel id -> queued inbound lines
 	nextID  int
-	out     chan contracts.Event
+	out     chan tui.RoutedEvent
+
+	ctrlMu sync.Mutex
+	ctrl   contracts.SessionControl // set by BindSessionControl (Task 6); nil-safe here
 }
 
 var (
-	_ contracts.Gateway       = (*Terminal)(nil)
-	_ contracts.ChannelReader = (*Terminal)(nil)
-	_ contracts.EventSink     = (*Terminal)(nil)
-	_ contracts.Foreground    = (*Terminal)(nil)
+	_ contracts.Gateway         = (*Terminal)(nil)
+	_ contracts.ChannelReader   = (*Terminal)(nil)
+	_ contracts.EventSink       = (*Terminal)(nil)
+	_ contracts.RoutedEventSink = (*Terminal)(nil)
+	_ contracts.Foreground      = (*Terminal)(nil)
 )
 
 // RunForeground satisfies contracts.Foreground: the terminal gateway owns the
@@ -63,25 +68,26 @@ func (t *Terminal) RunForeground(ctx context.Context, cancel context.CancelFunc)
 
 // New builds an unbound terminal gateway.
 func New() *Terminal {
-	return &Terminal{out: make(chan contracts.Event, 64)}
+	return &Terminal{pending: map[string][]contracts.Message{}, out: make(chan tui.RoutedEvent, 256)}
 }
 
-// Submit enqueues a line the user typed in the TUI as an inbound message.
-func (t *Terminal) Submit(text string) {
+// Submit enqueues a line the user typed in the TUI as an inbound message on the
+// given channel (the active tab's session channel).
+func (t *Terminal) Submit(channel, text string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.nextID++
-	t.pending = append(t.pending, contracts.Message{
+	t.pending[channel] = append(t.pending[channel], contracts.Message{
 		ID:         "t" + strconv.Itoa(t.nextID),
-		ChannelID:  ChannelID,
+		ChannelID:  channel,
 		Content:    text,
 		AuthorID:   "local",
 		AuthorName: "you",
 	})
 }
 
-// Frontend yields outbound events for the TUI to render.
-func (t *Terminal) Frontend() <-chan contracts.Event { return t.out }
+// Frontend yields routed outbound events for the TUI to render.
+func (t *Terminal) Frontend() <-chan tui.RoutedEvent { return t.out }
 
 // --- contracts.ChannelReader ---
 
@@ -92,23 +98,24 @@ func (t *Terminal) EnsureChannel(context.Context, string, string) (contracts.Cha
 	return contracts.Channel{ID: ChannelID, Name: ChannelID}, nil
 }
 
-// Read drains and returns all lines typed since the last Read (the hub polls
-// this like any gateway). after/limit are ignored: the terminal has no history.
-func (t *Terminal) Read(_ context.Context, _ string, _ int, _ string) ([]contracts.Message, error) {
+// Read drains and returns the lines queued for channelID since the last Read.
+// The hub polls this per-session with the session's own channel, so each
+// session drains only its own input.
+func (t *Terminal) Read(_ context.Context, channelID string, _ int, _ string) ([]contracts.Message, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if len(t.pending) == 0 {
+	out := t.pending[channelID]
+	if len(out) == 0 {
 		return nil, nil
 	}
-	out := t.pending
-	t.pending = nil
+	delete(t.pending, channelID)
 	return out, nil
 }
 
 func (t *Terminal) Unreact(context.Context, string, string, string) error { return nil }
 
-func (t *Terminal) UpsertStatusMessage(_ context.Context, _, _, content string) (string, error) {
-	t.emit(contracts.Event{T: "status", Text: content})
+func (t *Terminal) UpsertStatusMessage(_ context.Context, channelID, _, content string) (string, error) {
+	t.EmitTo(contracts.Conversation{Gateway: "terminal", ID: channelID}, contracts.Event{T: "status", Text: content})
 	return "", nil
 }
 
@@ -118,13 +125,13 @@ func (t *Terminal) Manifest() contracts.Manifest {
 	return contracts.Manifest{Kind: "terminal", Category: contracts.CategoryGateway}
 }
 
-func (t *Terminal) Post(_ context.Context, _ contracts.Conversation, text string) (contracts.MessageID, error) {
-	t.emit(contracts.Event{T: "reply", Text: text, Done: true})
+func (t *Terminal) Post(_ context.Context, conv contracts.Conversation, text string) (contracts.MessageID, error) {
+	t.EmitTo(conv, contracts.Event{T: "reply", Text: text, Done: true})
 	return "", nil
 }
 
-func (t *Terminal) Reply(_ context.Context, _ contracts.Conversation, _ contracts.MessageID, text string) (contracts.MessageID, error) {
-	t.emit(contracts.Event{T: "reply", Text: text, Done: true})
+func (t *Terminal) Reply(_ context.Context, conv contracts.Conversation, _ contracts.MessageID, text string) (contracts.MessageID, error) {
+	t.EmitTo(conv, contracts.Event{T: "reply", Text: text, Done: true})
 	return "", nil
 }
 
@@ -132,21 +139,41 @@ func (t *Terminal) React(context.Context, contracts.Conversation, contracts.Mess
 	return nil
 }
 
-func (t *Terminal) Menu(_ context.Context, _ contracts.Conversation, _ contracts.MessageID, prompt string, opts []contracts.Choice) error {
-	t.emit(contracts.Event{T: "status", Text: prompt})
+func (t *Terminal) Menu(_ context.Context, conv contracts.Conversation, _ contracts.MessageID, prompt string, opts []contracts.Choice) error {
+	t.EmitTo(conv, contracts.Event{T: "status", Text: prompt})
 	return nil
+}
+
+// --- contracts.RoutedEventSink ---
+
+// EmitTo routes a turn event to the conversation's tab in the TUI.
+func (t *Terminal) EmitTo(conv contracts.Conversation, e contracts.Event) {
+	t.emit(tui.RoutedEvent{Conv: conv, Event: e})
 }
 
 // --- contracts.EventSink ---
 
-// Emit forwards a live turn event to the TUI. This is the rich path: when the
-// hub sees the terminal gateway implements EventSink it streams every event
-// here rather than only posting the final reply.
-func (t *Terminal) Emit(e contracts.Event) { t.emit(e) }
+// Emit (legacy EventSink) routes to the default single channel. The hub calls
+// this when it sees only EventSink; RoutedEventSink takes priority (Task 2).
+func (t *Terminal) Emit(e contracts.Event) {
+	t.emit(tui.RoutedEvent{Conv: contracts.Conversation{Gateway: "terminal", ID: ChannelID}, Event: e})
+}
 
-func (t *Terminal) emit(e contracts.Event) {
+func (t *Terminal) emit(re tui.RoutedEvent) {
 	select {
-	case t.out <- e:
+	case t.out <- re:
 	default: // TUI not draining fast enough → drop rather than block the hub
 	}
+}
+
+// Sessions returns the hub's sessions for tab labels (nil until SessionControl
+// is bound — see BindSessionControl).
+func (t *Terminal) Sessions() []contracts.SessionInfo {
+	t.ctrlMu.Lock()
+	c := t.ctrl
+	t.ctrlMu.Unlock()
+	if c == nil {
+		return nil
+	}
+	return c.Sessions()
 }
