@@ -120,9 +120,11 @@ func TestGatewaySetExposesAdmin(t *testing.T) {
 	}
 }
 
-// fakeSessionControl is a minimal contracts.SessionControl for Dispatch tests.
+// fakeSessionControl is a minimal contracts.SessionControl for Dispatch and
+// ensureDefaultSession tests.
 type fakeSessionControl struct {
 	lastArgs []string
+	sessions []contracts.SessionInfo
 }
 
 func (f *fakeSessionControl) Dispatch(_ context.Context, args []string) (string, error) {
@@ -130,7 +132,7 @@ func (f *fakeSessionControl) Dispatch(_ context.Context, args []string) (string,
 	return "ok", nil
 }
 
-func (f *fakeSessionControl) Sessions() []contracts.SessionInfo { return nil }
+func (f *fakeSessionControl) Sessions() []contracts.SessionInfo { return f.sessions }
 
 func TestDispatchDefaultsSessionCreateToTerminal(t *testing.T) {
 	tm := New()
@@ -170,5 +172,60 @@ func TestDispatchPassesThroughNonCreate(t *testing.T) {
 	}
 	if len(fake.lastArgs) != 2 || fake.lastArgs[0] != "session" || fake.lastArgs[1] != "list" {
 		t.Fatalf("args changed for non-create: %v", fake.lastArgs)
+	}
+}
+
+// --- ensureDefaultSession ---
+
+func TestEnsureDefaultSessionCreatesWhenNone(t *testing.T) {
+	fake := &fakeSessionControl{} // Sessions() returns nil/empty
+	if err := ensureDefaultSession(context.Background(), fake); err != nil {
+		t.Fatalf("ensureDefaultSession: %v", err)
+	}
+	if len(fake.lastArgs) < 2 || fake.lastArgs[0] != "session" || fake.lastArgs[1] != "create" {
+		t.Fatalf("expected session create, got: %v", fake.lastArgs)
+	}
+	hasTerminalOnly, hasName := false, false
+	for _, a := range fake.lastArgs {
+		if a == "--terminal_only" {
+			hasTerminalOnly = true
+		}
+		if a == "main" {
+			hasName = true
+		}
+	}
+	if !hasTerminalOnly {
+		t.Fatalf("--terminal_only missing from args: %v", fake.lastArgs)
+	}
+	if !hasName {
+		t.Fatalf("--name main missing from args: %v", fake.lastArgs)
+	}
+}
+
+func TestEnsureDefaultSessionSkipsWhenTerminalExists(t *testing.T) {
+	fake := &fakeSessionControl{
+		sessions: []contracts.SessionInfo{
+			{Name: "main", ChannelID: "ch1", Type: "shared", Gateways: []string{"terminal"}},
+		},
+	}
+	if err := ensureDefaultSession(context.Background(), fake); err != nil {
+		t.Fatalf("ensureDefaultSession: %v", err)
+	}
+	if fake.lastArgs != nil {
+		t.Fatalf("Dispatch must not be called when a terminal session exists; got args: %v", fake.lastArgs)
+	}
+}
+
+func TestEnsureDefaultSessionCreatesWhenOnlyDiscord(t *testing.T) {
+	fake := &fakeSessionControl{
+		sessions: []contracts.SessionInfo{
+			{Name: "discord-main", ChannelID: "ch2", Type: "shared", Gateways: []string{"discord"}},
+		},
+	}
+	if err := ensureDefaultSession(context.Background(), fake); err != nil {
+		t.Fatalf("ensureDefaultSession: %v", err)
+	}
+	if len(fake.lastArgs) < 2 || fake.lastArgs[0] != "session" || fake.lastArgs[1] != "create" {
+		t.Fatalf("expected session create when only discord session exists; got: %v", fake.lastArgs)
 	}
 }

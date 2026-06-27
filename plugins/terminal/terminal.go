@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	contracts "github.com/Herrscherd/herrscher-contracts"
 	"github.com/Herrscherd/herrscher/plugins/terminal/tui"
@@ -61,12 +62,54 @@ var (
 	_ contracts.SessionControlReceiver = (*Terminal)(nil)
 )
 
+// ensureDefaultSession creates a default terminal-bound session when none is
+// live yet, so a freshly launched TUI has a ready tab that replies immediately.
+// It is a no-op when a session already bound to the terminal gateway exists.
+func ensureDefaultSession(ctx context.Context, c contracts.SessionControl) error {
+	for _, s := range c.Sessions() {
+		for _, g := range s.Gateways {
+			if g == "terminal" {
+				return nil // a terminal session already exists
+			}
+		}
+	}
+	_, err := c.Dispatch(ctx, []string{"session", "create", "--name", "main", "--terminal_only", "--shared"})
+	return err
+}
+
+// bootstrapDefaultSession waits briefly for the host to bind SessionControl
+// (RunHub binds it from a background goroutine after the TUI may have started),
+// then ensures a default session exists. Never blocks forever: if ctrl isn't
+// bound within ~5 s, or ctx is cancelled, it returns silently so the TUI still
+// launches. A failed bootstrap is best-effort and must not stop the TUI.
+func (t *Terminal) bootstrapDefaultSession(ctx context.Context) {
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-deadline:
+			return
+		case <-ticker.C:
+			c := t.Control()
+			if c == nil {
+				continue
+			}
+			_ = ensureDefaultSession(ctx, c) // best-effort; error silently ignored
+			return
+		}
+	}
+}
+
 // RunForeground satisfies contracts.Foreground: the terminal gateway owns the
 // process's main thread by running its Bubbletea TUI, blocking until the user
 // quits (which calls cancel to tear the daemon down) or ctx is cancelled. The
 // composition root runs this for the one bound gateway that implements
 // Foreground, on an interactive TTY only.
 func (t *Terminal) RunForeground(ctx context.Context, cancel context.CancelFunc) error {
+	t.bootstrapDefaultSession(ctx)
 	return tui.Run(ctx, cancel, t)
 }
 
