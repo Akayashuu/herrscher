@@ -45,7 +45,7 @@ func (f *fakeDiscord) Send(ctx context.Context, channelID, content string) error
 }
 
 func TestDiscordInterfaceHasSend(t *testing.T) {
-	var _ discord = (*fakeDiscord)(nil)
+	var _ channelAdmin = (*fakeDiscord)(nil)
 }
 
 type fakeSup struct{ started, stopped []string }
@@ -238,6 +238,29 @@ func TestSessionCreateForum(t *testing.T) {
 	}
 	if len(sup.started) != 1 {
 		t.Fatal("expected bridge started")
+	}
+}
+
+func TestSessionCreateTerminalHome(t *testing.T) {
+	h, d, _, _, _, st := newTestHandler(t, "terminal")
+	_ = st.SetHome(state.HomeRef{ID: "term-home", Type: "terminal"})
+
+	out, err := h.sessionCreateRun(context.Background(), args("name", "alpha", "terminal_only", "true", "shared", "true"))
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	sess, ok := st.FindSession("alpha")
+	if !ok {
+		t.Fatal("session not persisted")
+	}
+	if sess.Type != "text" || sess.ChannelID == "" {
+		t.Fatalf("bad session: %+v", sess)
+	}
+	if strings.Contains(out, "<#") || strings.Contains(out, "<@") {
+		t.Fatalf("output must be platform-neutral: %q", out)
+	}
+	if len(d.created) == 0 {
+		t.Fatal("CreateUnder should have been called for terminal home")
 	}
 }
 

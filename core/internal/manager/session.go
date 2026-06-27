@@ -145,7 +145,7 @@ func (h *Handler) sessionCreateRun(ctx context.Context, in contracts.Input) (str
 	title := h.st.QualifiedName(name)
 	var sess state.Session
 	switch home.Type {
-	case "category":
+	case "category", "terminal":
 		chID, err := h.d.CreateUnder(ctx, home.ID, title)
 		if err != nil {
 			rollbackWorktree()
@@ -170,6 +170,9 @@ func (h *Handler) sessionCreateRun(ctx context.Context, in contracts.Input) (str
 	}
 	banner := sessionBanner(repo, name, worktree, h.wt.Branch(name), cmd, shared)
 	_ = h.d.Send(ctx, sess.ChannelID, banner) // best-effort; reply is source of truth
+	if home.Type == "terminal" {
+		return fmt.Sprintf("✅ Session **%s** running on %s.\n\n%s", name, sess.ChannelID, banner), nil
+	}
 	return fmt.Sprintf("✅ Running on <#%s>.\n\n%s", sess.ChannelID, banner), nil
 }
 

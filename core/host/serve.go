@@ -86,6 +86,10 @@ type Options struct {
 	// RemoteCategories lists plugin categories served out-of-process; RunHub
 	// spawns and supervises a plugin-host child per entry. Empty => all in-proc.
 	RemoteCategories map[contracts.Category]bool
+
+	// ForegroundBound is true when a foreground (TUI) gateway is bound to the
+	// process. Set by the caller (serve.go runServe) where fg != nil is computed.
+	ForegroundBound bool
 }
 
 // HomeRef is the seed home channel from config.json: a channel id and its kind
@@ -164,6 +168,7 @@ func RunHub(ctx context.Context, gws []Deps, o Options) error {
 		home = &state.HomeRef{ID: o.Home.ID, Type: o.Home.Type}
 	}
 	st.ApplyDefaults(home, o.Workspace, o.Source)
+	seedTerminalHome(st, o.ForegroundBound)
 
 	self, _ := os.Executable()
 	startRemotePluginHosts(ctx, self, o.RemoteCategories, base)
@@ -231,6 +236,16 @@ func RunHub(ctx context.Context, gws []Deps, o Options) error {
 	log.Info("hub up; supervising sessions; bot online")
 	<-ctx.Done()
 	return ctx.Err()
+}
+
+// seedTerminalHome sets a terminal home when a foreground (TUI) gateway is bound
+// and no home is configured, so session create works with no Discord. It never
+// overwrites an existing home (a Discord setup keeps its category/forum).
+func seedTerminalHome(st *state.State, hasForeground bool) {
+	if !hasForeground || st.Home.ID != "" {
+		return
+	}
+	_ = st.SetHome(state.HomeRef{ID: "terminal", Type: "terminal"})
 }
 
 func startRemotePluginHosts(ctx context.Context, self string, remote map[contracts.Category]bool, log *slog.Logger) {

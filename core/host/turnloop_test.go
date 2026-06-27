@@ -480,3 +480,47 @@ var errStopScan = stopScanErr{}
 type stopScanErr struct{}
 
 func (stopScanErr) Error() string { return "stop" }
+
+// A gateway implementing RoutedEventSink must receive EmitTo with the session's
+// conversation (gateway kind + bound channel), in preference to Emit.
+func TestFanOutPrefersRoutedEventSink(t *testing.T) {
+	rec := &routedRec{}
+	d := newSessionDriver("s1", []contracts.GatewaySet{{Gateway: rec}}, nil, nil)
+	d.channel = "chan-1"
+
+	d.fanOut(context.Background(), contracts.Event{T: "chunk", Text: "hi"})
+
+	if len(rec.convs) != 1 {
+		t.Fatalf("EmitTo not called once: %+v", rec.convs)
+	}
+	if rec.convs[0].ID != "chan-1" || rec.convs[0].Gateway != "term" {
+		t.Fatalf("wrong conversation: %+v", rec.convs[0])
+	}
+	if rec.plainCalls != 0 {
+		t.Fatalf("Emit should not be called when RoutedEventSink is present")
+	}
+}
+
+// routedRec is a minimal Gateway + RoutedEventSink + EventSink recorder.
+type routedRec struct {
+	convs      []contracts.Conversation
+	plainCalls int
+}
+
+func (r *routedRec) Manifest() contracts.Manifest { return contracts.Manifest{Kind: "term"} }
+func (r *routedRec) Post(context.Context, contracts.Conversation, string) (contracts.MessageID, error) {
+	return "", nil
+}
+func (r *routedRec) Reply(context.Context, contracts.Conversation, contracts.MessageID, string) (contracts.MessageID, error) {
+	return "", nil
+}
+func (r *routedRec) React(context.Context, contracts.Conversation, contracts.MessageID, string) error {
+	return nil
+}
+func (r *routedRec) Menu(context.Context, contracts.Conversation, contracts.MessageID, string, []contracts.Choice) error {
+	return nil
+}
+func (r *routedRec) Emit(contracts.Event) { r.plainCalls++ }
+func (r *routedRec) EmitTo(c contracts.Conversation, _ contracts.Event) {
+	r.convs = append(r.convs, c)
+}

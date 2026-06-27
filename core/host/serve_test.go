@@ -3,11 +3,27 @@ package host
 import (
 	"io"
 	"log/slog"
+	"path/filepath"
 	"testing"
 
 	"github.com/Herrscherd/herrscher/core/internal/obs"
 	"github.com/Herrscherd/herrscher/core/internal/state"
 )
+
+func TestSeedTerminalHomeWhenForeground(t *testing.T) {
+	st := state.NewState(filepath.Join(t.TempDir(), "state.json"))
+	seedTerminalHome(st, true /* hasForeground */)
+	if st.Home.Type != "terminal" || st.Home.ID == "" {
+		t.Fatalf("home not seeded: %+v", st.Home)
+	}
+	// Does not overwrite an existing home.
+	st2 := state.NewState(filepath.Join(t.TempDir(), "s2.json"))
+	_ = st2.SetHome(state.HomeRef{ID: "disc", Type: "category"})
+	seedTerminalHome(st2, true)
+	if st2.Home.Type != "category" {
+		t.Fatalf("existing home overwritten: %+v", st2.Home)
+	}
+}
 
 func TestResolveInstanceID(t *testing.T) {
 	tests := []struct {
