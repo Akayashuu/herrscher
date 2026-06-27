@@ -326,6 +326,19 @@ hub owns the FIFO and connection lifecycle, so if the bridge crashes the
 supervisor restarts it and it re-dials the same socket, resuming with the next
 queued input. Authorization and message-id tracking live in the hub, not here.
 
+**Keybindings.**
+
+| Key | Action |
+|-----|--------|
+| `Tab` / `Shift+Tab` | Switch to next/previous session tab |
+| `Enter` | Send the typed line to the active session (lines starting with `/` are run as commands) |
+| `Ctrl+W` then `y` | Close the active session (any other key cancels) |
+| `?` (empty input) | Toggle keybinding help overlay |
+| `PgUp` / `PgDn` | Scroll the active tab's transcript |
+| `Ctrl+C` / `Esc` | Quit the TUI (shuts down the daemon) |
+
+Tab markers: `•` = unread background activity, `⟳` = streaming. Footer shows active session state (working/idle/disconnected) and last turn cost.
+
 ---
 
 ## Session lifecycle
