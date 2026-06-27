@@ -8,7 +8,7 @@ import (
 // Commands (commands.go) turns its methods into declared contracts.Cmd values
 // the CLI dispatches.
 type Handler struct {
-	d          discord
+	d          channelAdmin
 	sup        supervisor
 	wt         worktrees
 	fg         forges
@@ -23,7 +23,7 @@ type Handler struct {
 // session is created without an explicit cmd. partDir is the directory under
 // which per-session participant journals live (participants/<name>.log). agents
 // owns the durable agent homes used to provision sessions.
-func NewHandler(d discord, sup supervisor, wt worktrees, fg forges, up updater, agents agentStore, st *state.State, defaultCmd, partDir string) *Handler {
+func NewHandler(d channelAdmin, sup supervisor, wt worktrees, fg forges, up updater, agents agentStore, st *state.State, defaultCmd, partDir string) *Handler {
 	return &Handler{d: d, sup: sup, wt: wt, fg: fg, up: up, agents: agents, st: st, defaultCmd: defaultCmd, partDir: partDir}
 }
 
