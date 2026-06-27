@@ -45,14 +45,16 @@ var (
 	costStyle   = lipgloss.NewStyle().Faint(true)
 )
 
-// tab is one session's pane: its transcript, unread flag, busy state, and last cost.
+// tab is one session's pane: its transcript, unread flag, busy state, last cost,
+// and a disconnected flag set when the last event was an "abandoned" turn.
 type tab struct {
-	channel  string
-	label    string
-	lines    []string
-	unread   bool
-	busy     bool
-	lastCost float64
+	channel      string
+	label        string
+	lines        []string
+	unread       bool
+	busy         bool
+	lastCost     float64
+	disconnected bool
 }
 
 type eventMsg RoutedEvent
@@ -66,13 +68,15 @@ func tickCmd() tea.Cmd {
 }
 
 type model struct {
-	tm     Backend
-	vp     viewport.Model
-	input  textinput.Model
-	tabs   map[string]*tab
-	order  []string
-	active string
-	ready  bool
+	tm           Backend
+	vp           viewport.Model
+	input        textinput.Model
+	tabs         map[string]*tab
+	order        []string
+	active       string
+	ready        bool
+	showHelp     bool
+	pendingClose bool
 }
 
 func newModel(tm Backend) *model {
@@ -188,6 +192,21 @@ func (m *model) handleEnter() {
 	m.syncViewport()
 }
 
+// toggleHelp flips the help overlay on/off.
+func (m *model) toggleHelp() {
+	m.showHelp = !m.showHelp
+}
+
+// confirmClose dispatches a close for the active tab's session by label (name).
+func (m *model) confirmClose() {
+	tb := m.tabs[m.active]
+	if tb == nil || tb.label == "" {
+		return
+	}
+	_, _ = m.tm.Dispatch([]string{"session", "close", "--name", tb.label})
+	m.syncTabs()
+}
+
 func (m *model) switchTab(delta int) {
 	if len(m.order) == 0 {
 		return
@@ -206,6 +225,10 @@ func (m *model) switchTab(delta int) {
 }
 
 func (m *model) renderInto(tb *tab, e contracts.Event) {
+	// Any non-abandoned event clears the disconnected marker.
+	if e.T != "abandoned" {
+		tb.disconnected = false
+	}
 	switch e.T {
 	case "chunk":
 		tb.busy = true
@@ -229,6 +252,7 @@ func (m *model) renderInto(tb *tab, e contracts.Event) {
 	case "reset":
 		tb.lines = append(tb.lines, statusStyle.Render("· (turn reset)"))
 	case "abandoned":
+		tb.disconnected = true
 		tb.lines = append(tb.lines, statusStyle.Render("· (turn abandoned)"))
 	}
 }
@@ -272,6 +296,9 @@ func (m *model) footer() string {
 	tb := m.tabs[m.active]
 	if tb == nil {
 		return ""
+	}
+	if tb.disconnected {
+		return statusStyle.Render("· disconnected")
 	}
 	state := statusStyle.Render("· idle")
 	if tb.busy {
@@ -333,6 +360,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.input.Width = msg.Width - 2
 	case tea.KeyMsg:
+		// Two-step close confirm: if waiting for confirmation, next key decides.
+		if m.pendingClose {
+			if msg.String() == "y" {
+				m.confirmClose()
+			}
+			m.pendingClose = false
+			return m, nil
+		}
 		switch msg.Type {
 		case tea.KeyCtrlC, tea.KeyEsc:
 			return m, tea.Quit
@@ -344,7 +379,16 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case tea.KeyEnter:
 			m.handleEnter()
+		case tea.KeyCtrlW:
+			m.pendingClose = true
+			return m, nil
+		case tea.KeyRunes:
+			if msg.String() == "?" {
+				m.toggleHelp()
+				return m, nil
+			}
 		}
+		// PgUp/PgDn reach m.vp.Update(msg) below — not intercepted here.
 	case eventMsg:
 		m.route(RoutedEvent(msg))
 	case tickMsg:
@@ -360,9 +404,24 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+// helpView returns the key-binding cheat-sheet rendered as a faint status block.
+func (m *model) helpView() string {
+	lines := []string{
+		"Keys:  Tab / Shift+Tab  switch tab        Ctrl+W  close tab (y to confirm)",
+		"       PgUp / PgDn      scroll             ?       toggle this help",
+		"       Enter            submit / /cmd      Ctrl+C / Esc  quit",
+	}
+	return statusStyle.Render(strings.Join(lines, "\n"))
+}
+
 func (m *model) View() string {
 	if !m.ready {
 		return "starting…"
 	}
-	return fmt.Sprintf("%s\n%s\n%s\n%s", m.tabBar(), m.vp.View(), m.footer(), m.input.View())
+	var parts []string
+	if m.showHelp {
+		parts = append(parts, m.helpView())
+	}
+	parts = append(parts, m.tabBar(), m.vp.View(), m.footer(), m.input.View())
+	return strings.Join(parts, "\n")
 }

@@ -156,3 +156,47 @@ func TestResizeSyncsViewport(t *testing.T) {
 		t.Fatalf("resize: vp.Width=%d (want 100), vp.Height=%d (want 25)", m.vp.Width, m.vp.Height)
 	}
 }
+
+func TestHelpToggle(t *testing.T) {
+	m := newModel(&fakeBackend{})
+	if m.showHelp {
+		t.Fatal("help off by default")
+	}
+	m.toggleHelp()
+	if !m.showHelp {
+		t.Fatal("help must toggle on")
+	}
+}
+
+func TestCloseActiveDispatchesClose(t *testing.T) {
+	f := &fakeBackend{}
+	m := newModel(f)
+	tb := m.ensureTab("terminal/alpha-1")
+	tb.label = "alpha"
+	m.active = "terminal/alpha-1"
+	m.confirmClose() // simulate confirmed close
+	if len(f.dispatched) != 1 || f.dispatched[0][0] != "session" || f.dispatched[0][1] != "close" {
+		t.Fatalf("close not dispatched: %+v", f.dispatched)
+	}
+	found := false
+	for _, a := range f.dispatched[0] {
+		if a == "alpha" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("close must target the active session name: %+v", f.dispatched[0])
+	}
+}
+
+func TestAbandonedSetsDisconnected(t *testing.T) {
+	m := newModel(&fakeBackend{})
+	m.route(RoutedEvent{Conv: contracts.Conversation{ID: "a"}, Event: contracts.Event{T: "abandoned"}})
+	if !m.tabs["a"].disconnected {
+		t.Fatal("abandoned must set disconnected")
+	}
+	m.route(RoutedEvent{Conv: contracts.Conversation{ID: "a"}, Event: contracts.Event{T: "chunk", Text: "hi"}})
+	if m.tabs["a"].disconnected {
+		t.Fatal("chunk must clear disconnected")
+	}
+}
