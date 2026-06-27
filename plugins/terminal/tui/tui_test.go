@@ -175,17 +175,12 @@ func TestCloseActiveDispatchesClose(t *testing.T) {
 	tb.label = "alpha"
 	m.active = "terminal/alpha-1"
 	m.confirmClose() // simulate confirmed close
-	if len(f.dispatched) != 1 || f.dispatched[0][0] != "session" || f.dispatched[0][1] != "close" {
+	if len(f.dispatched) != 1 {
 		t.Fatalf("close not dispatched: %+v", f.dispatched)
 	}
-	found := false
-	for _, a := range f.dispatched[0] {
-		if a == "alpha" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("close must target the active session name: %+v", f.dispatched[0])
+	// Assert positional args: session close --name alpha
+	if len(f.dispatched[0]) != 4 || f.dispatched[0][0] != "session" || f.dispatched[0][1] != "close" || f.dispatched[0][2] != "--name" || f.dispatched[0][3] != "alpha" {
+		t.Fatalf("close args mismatch: got %+v, want [session close --name alpha]", f.dispatched[0])
 	}
 }
 
@@ -198,5 +193,88 @@ func TestAbandonedSetsDisconnected(t *testing.T) {
 	m.route(RoutedEvent{Conv: contracts.Conversation{ID: "a"}, Event: contracts.Event{T: "chunk", Text: "hi"}})
 	if m.tabs["a"].disconnected {
 		t.Fatal("chunk must clear disconnected")
+	}
+}
+
+func TestQuestionMarkTogglesHelpWhenEmpty(t *testing.T) {
+	m := newModel(&fakeBackend{})
+	if m.showHelp {
+		t.Fatal("help must start off")
+	}
+	// Send ? with empty input
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")}
+	m.Update(msg)
+	if !m.showHelp {
+		t.Fatal("? with empty input must toggle help on")
+	}
+	// Send ? again to toggle off
+	m.Update(msg)
+	if m.showHelp {
+		t.Fatal("? with empty input must toggle help off")
+	}
+}
+
+func TestQuestionMarkTypedWhenInputNonEmpty(t *testing.T) {
+	m := newModel(&fakeBackend{})
+	m.input.SetValue("foo")
+	if m.showHelp {
+		t.Fatal("help must start off")
+	}
+	// Send ? with non-empty input
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")}
+	m.Update(msg)
+	if m.showHelp {
+		t.Fatal("? with non-empty input must not toggle help")
+	}
+	// Verify ? was typed into input (should have "foo?")
+	if !strings.Contains(m.input.Value(), "?") {
+		t.Fatalf("? must be typed into input: got %q", m.input.Value())
+	}
+}
+
+func TestPendingCloseCtrlCQuits(t *testing.T) {
+	m := newModel(&fakeBackend{})
+	m.pendingClose = true
+	if !m.pendingClose {
+		t.Fatal("pendingClose must be true")
+	}
+	// Send Ctrl+C while pendingClose is true
+	msg := tea.KeyMsg{Type: tea.KeyCtrlC}
+	_, cmd := m.Update(msg)
+	if m.pendingClose {
+		t.Fatal("Ctrl+C during pendingClose must clear pendingClose")
+	}
+	// tea.Quit() is a function that returns a Cmd; we verify cmd is not nil (it's the quit command)
+	if cmd == nil {
+		t.Fatal("Ctrl+C during pendingClose must return a quit command")
+	}
+}
+
+func TestPendingCloseEscQuits(t *testing.T) {
+	m := newModel(&fakeBackend{})
+	m.pendingClose = true
+	// Send Esc while pendingClose is true
+	msg := tea.KeyMsg{Type: tea.KeyEsc}
+	_, cmd := m.Update(msg)
+	if m.pendingClose {
+		t.Fatal("Esc during pendingClose must clear pendingClose")
+	}
+	// tea.Quit() is a function that returns a Cmd; we verify cmd is not nil
+	if cmd == nil {
+		t.Fatal("Esc during pendingClose must return a quit command")
+	}
+}
+
+func TestPendingCloseOtherKeyCancels(t *testing.T) {
+	m := newModel(&fakeBackend{})
+	m.pendingClose = true
+	// Send 'n' (any non-y key) while pendingClose is true
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")}
+	_, cmd := m.Update(msg)
+	if m.pendingClose {
+		t.Fatal("non-y key during pendingClose must clear pendingClose")
+	}
+	if cmd != nil {
+		t.Fatalf("non-y key during pendingClose must return nil cmd, got %v", cmd)
 	}
 }

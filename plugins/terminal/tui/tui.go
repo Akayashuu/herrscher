@@ -364,7 +364,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.pendingClose {
 			if msg.String() == "y" {
 				m.confirmClose()
+				m.pendingClose = false
+				return m, nil
 			}
+			// Quit keys always quit, even during pending close.
+			if msg.Type == tea.KeyCtrlC || msg.Type == tea.KeyEsc {
+				m.pendingClose = false
+				return m, tea.Quit
+			}
+			// Any other key cancels the close.
 			m.pendingClose = false
 			return m, nil
 		}
@@ -383,7 +391,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pendingClose = true
 			return m, nil
 		case tea.KeyRunes:
-			if msg.String() == "?" {
+			if msg.String() == "?" && m.input.Value() == "" {
 				m.toggleHelp()
 				return m, nil
 			}
