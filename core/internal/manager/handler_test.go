@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -13,7 +14,7 @@ import (
 
 type sentMsg struct{ channelID, content string }
 
-type fakeDiscord struct {
+type fakeChannelAdmin struct {
 	created  []string
 	archived []string
 	homeType string
@@ -21,22 +22,22 @@ type fakeDiscord struct {
 	sendErr  error
 }
 
-func (f *fakeDiscord) Kind(ctx context.Context, id string) (string, error) {
+func (f *fakeChannelAdmin) Kind(ctx context.Context, id string) (string, error) {
 	return f.homeType, nil
 }
-func (f *fakeDiscord) CreateUnder(ctx context.Context, parentID, name string) (string, error) {
+func (f *fakeChannelAdmin) CreateUnder(ctx context.Context, parentID, name string) (string, error) {
 	f.created = append(f.created, name)
 	return "new-" + name, nil
 }
-func (f *fakeDiscord) ForumPost(ctx context.Context, forumID, name, content string) (string, error) {
+func (f *fakeChannelAdmin) ForumPost(ctx context.Context, forumID, name, content string) (string, error) {
 	f.created = append(f.created, "forum:"+name)
 	return "post-" + name, nil
 }
-func (f *fakeDiscord) Archive(ctx context.Context, id string) error {
+func (f *fakeChannelAdmin) Archive(ctx context.Context, id string) error {
 	f.archived = append(f.archived, id)
 	return nil
 }
-func (f *fakeDiscord) Send(ctx context.Context, channelID, content string) error {
+func (f *fakeChannelAdmin) Send(ctx context.Context, channelID, content string) error {
 	if f.sendErr != nil {
 		return f.sendErr
 	}
@@ -44,8 +45,8 @@ func (f *fakeDiscord) Send(ctx context.Context, channelID, content string) error
 	return nil
 }
 
-func TestDiscordInterfaceHasSend(t *testing.T) {
-	var _ discord = (*fakeDiscord)(nil)
+func TestChannelAdminInterfaceHasSend(t *testing.T) {
+	var _ channelAdmin = (*fakeChannelAdmin)(nil)
 }
 
 type fakeSup struct{ started, stopped []string }
@@ -103,15 +104,15 @@ func (f *fakeUpdater) Build(ctx context.Context, pull bool) (string, error) {
 }
 func (f *fakeUpdater) Restart(ctx context.Context) error { f.restarts++; return f.restartErr }
 
-func newTestHandler(t *testing.T, homeType string) (*Handler, *fakeDiscord, *fakeSup, *fakeWT, *fakeForge, *state.State) {
+func newTestHandler(t *testing.T, homeType string) (*Handler, *fakeChannelAdmin, *fakeSup, *fakeWT, *fakeForge, *state.State) {
 	t.Helper()
 	h, _, d, sup, wt, fg, st := newTestHandlerWithUpdater(t, homeType)
 	return h, d, sup, wt, fg, st
 }
 
-func newTestHandlerWithUpdater(t *testing.T, homeType string) (*Handler, *fakeUpdater, *fakeDiscord, *fakeSup, *fakeWT, *fakeForge, *state.State) {
+func newTestHandlerWithUpdater(t *testing.T, homeType string) (*Handler, *fakeUpdater, *fakeChannelAdmin, *fakeSup, *fakeWT, *fakeForge, *state.State) {
 	t.Helper()
-	d := &fakeDiscord{homeType: homeType}
+	d := &fakeChannelAdmin{homeType: homeType}
 	sup := &fakeSup{}
 	wt := &fakeWT{path: "/wt/x"}
 	fg := &fakeForge{}
@@ -238,6 +239,29 @@ func TestSessionCreateForum(t *testing.T) {
 	}
 	if len(sup.started) != 1 {
 		t.Fatal("expected bridge started")
+	}
+}
+
+func TestSessionCreateTerminalHome(t *testing.T) {
+	h, d, _, _, _, st := newTestHandler(t, "terminal")
+	_ = st.SetHome(state.HomeRef{ID: "term-home", Type: "terminal"})
+
+	out, err := h.sessionCreateRun(context.Background(), args("name", "alpha", "terminal_only", "true", "shared", "true"))
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	sess, ok := st.FindSession("alpha")
+	if !ok {
+		t.Fatal("session not persisted")
+	}
+	if sess.Type != "text" || sess.ChannelID == "" {
+		t.Fatalf("bad session: %+v", sess)
+	}
+	if strings.Contains(out, "<#") || strings.Contains(out, "<@") {
+		t.Fatalf("output must be platform-neutral: %q", out)
+	}
+	if len(d.created) == 0 {
+		t.Fatal("CreateUnder should have been called for terminal home")
 	}
 }
 
@@ -682,6 +706,33 @@ func TestSessionListEmptyAndPopulated(t *testing.T) {
 	out, err := h.sessionListRun(context.Background(), args())
 	if err != nil || !strings.Contains(out, "demo") {
 		t.Fatalf("populated list should mention demo: out=%q err=%v", out, err)
+	}
+}
+
+func TestSessionListNeutralForTerminalHome(t *testing.T) {
+	h, _, _, _, _, st := newTestHandler(t, "terminal")
+	_ = st.SetHome(state.HomeRef{ID: "term-home", Type: "terminal"})
+	st.AddSession(state.Session{Name: "alpha", ChannelID: "terminal/alpha-1", Type: "text"})
+	out, err := h.sessionListRun(context.Background(), args())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "<#") {
+		t.Fatalf("terminal home list must not leak Discord mention syntax: %q", out)
+	}
+	if !strings.Contains(out, "terminal/alpha-1") {
+		t.Fatalf("list should show the bare channel id: %q", out)
+	}
+}
+
+func TestSessionCreateRejectedAtLimit(t *testing.T) {
+	h, _, _, _, _, st := newTestHandler(t, "")
+	st.SetHome(state.HomeRef{ID: "cat1", Type: "category"})
+	for i := 0; i < maxSessions; i++ {
+		st.AddSession(state.Session{Name: fmt.Sprintf("s%d", i), ChannelID: fmt.Sprintf("c%d", i), Type: "text"})
+	}
+	if _, err := h.sessionCreateRun(context.Background(), args("name", "overflow")); err == nil {
+		t.Fatal("expected create to be rejected at the session limit")
 	}
 }
 

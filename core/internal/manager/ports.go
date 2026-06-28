@@ -16,8 +16,8 @@ type agentStore interface {
 	List() ([]agent.Agent, error)
 }
 
-// discord is the subset of Client the Handler needs (injected so routing is testable).
-type discord interface {
+// channelAdmin is the subset of a channel-admin client the Handler needs (injected so routing is testable).
+type channelAdmin interface {
 	Kind(ctx context.Context, id string) (string, error)
 	CreateUnder(ctx context.Context, parentID, name string) (channelID string, err error)
 	ForumPost(ctx context.Context, forumID, name, content string) (channelID string, err error)

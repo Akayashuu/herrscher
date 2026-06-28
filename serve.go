@@ -95,6 +95,7 @@ func runServe(ctx context.Context, args []string) error {
 		Source:        cfg.Source,
 
 		RemoteCategories: remoteCategories(),
+		ForegroundBound:  fg != nil,
 	}
 
 	// A bound foreground gateway + interactive TTY → run it on the main thread;

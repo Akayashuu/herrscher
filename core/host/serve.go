@@ -86,6 +86,10 @@ type Options struct {
 	// RemoteCategories lists plugin categories served out-of-process; RunHub
 	// spawns and supervises a plugin-host child per entry. Empty => all in-proc.
 	RemoteCategories map[contracts.Category]bool
+
+	// ForegroundBound is true when a foreground (TUI) gateway is bound to the
+	// process. Set by the caller (serve.go runServe) where fg != nil is computed.
+	ForegroundBound bool
 }
 
 // HomeRef is the seed home channel from config.json: a channel id and its kind
@@ -164,6 +168,7 @@ func RunHub(ctx context.Context, gws []Deps, o Options) error {
 		home = &state.HomeRef{ID: o.Home.ID, Type: o.Home.Type}
 	}
 	st.ApplyDefaults(home, o.Workspace, o.Source)
+	seedTerminalHome(st, o.ForegroundBound)
 
 	self, _ := os.Executable()
 	startRemotePluginHosts(ctx, self, o.RemoteCategories, base)
@@ -180,9 +185,10 @@ func RunHub(ctx context.Context, gws []Deps, o Options) error {
 	// The hub owns the live session set and the runtime command seam: the boot
 	// loop and any gateway-driven create/close both go through it, so a session
 	// added at runtime is wired exactly like one loaded here. The handler behind
-	// the registry uses the first gateway's channel admin to create/archive
-	// session channels.
-	reg, err := buildRegistry(ctx, Deps{Admin: firstAdmin(gws)}, o, st, sup, instID)
+	// the registry creates/archives session channels through the channel admin of
+	// the gateway that owns the home, so a terminal home is never minted by Discord
+	// (nor vice-versa) when both gateways are present.
+	reg, err := buildRegistry(ctx, Deps{Admin: adminForHome(gws, st.Home)}, o, st, sup, instID)
 	if err != nil {
 		return fmt.Errorf("build command registry: %w", err)
 	}
@@ -231,6 +237,16 @@ func RunHub(ctx context.Context, gws []Deps, o Options) error {
 	log.Info("hub up; supervising sessions; bot online")
 	<-ctx.Done()
 	return ctx.Err()
+}
+
+// seedTerminalHome sets a terminal home when a foreground (TUI) gateway is bound
+// and no home is configured, so session create works with no Discord. It never
+// overwrites an existing home (a Discord setup keeps its category/forum).
+func seedTerminalHome(st *state.State, hasForeground bool) {
+	if !hasForeground || st.Home.ID != "" {
+		return
+	}
+	_ = st.SetHome(state.HomeRef{ID: "terminal", Type: "terminal"})
 }
 
 func startRemotePluginHosts(ctx context.Context, self string, remote map[contracts.Category]bool, log *slog.Logger) {
@@ -291,6 +307,24 @@ func firstAdmin(gws []Deps) contracts.ChannelAdmin {
 		}
 	}
 	return nil
+}
+
+// adminForHome returns the ChannelAdmin of the gateway that owns the home, so a
+// session channel is minted on the same platform as its home. The terminal home
+// maps to the terminal gateway; a Discord category/forum home maps to a
+// non-terminal gateway. Falls back to the first available admin when no gateway
+// matches (e.g. an unset home, or only one admin present).
+func adminForHome(gws []Deps, home state.HomeRef) contracts.ChannelAdmin {
+	wantTerminal := home.Type == "terminal"
+	for _, g := range gws {
+		if g.Admin == nil || g.Gateway == nil {
+			continue
+		}
+		if (g.Gateway.Manifest().Kind == "terminal") == wantTerminal {
+			return g.Admin
+		}
+	}
+	return firstAdmin(gws)
 }
 
 // firstReader returns the first gateway's ChannelReader (nil if none expose one).

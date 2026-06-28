@@ -253,12 +253,20 @@ func (d *sessionDriver) awaitTurn(ctx context.Context) bool {
 }
 
 // fanOut delivers one turn event to every bound gateway: a gateway implementing
-// EventSink renders the full stream itself (progress, emojis, acknowledgements,
-// summary); a gateway that does not gets only the final reply posted through the
-// Gateway port, chunked. All rich, platform-specific rendering lives in the
-// gateway — the host only emits abstract semantic events.
+// RoutedEventSink renders routed events with conversation context; a gateway
+// implementing EventSink renders the full stream itself (progress, emojis,
+// acknowledgements, summary); a gateway that does not gets only the final reply
+// posted through the Gateway port, chunked. All rich, platform-specific rendering
+// lives in the gateway — the host only emits abstract semantic events.
 func (d *sessionDriver) fanOut(ctx context.Context, e contracts.Event) {
 	for i, g := range d.gateways {
+		if rs, ok := g.Gateway.(contracts.RoutedEventSink); ok {
+			rs.EmitTo(contracts.Conversation{
+				Gateway: g.Gateway.Manifest().Kind,
+				ID:      d.renderChannel(g),
+			}, e)
+			continue
+		}
 		if sink, ok := g.Gateway.(contracts.EventSink); ok {
 			sink.Emit(e)
 			continue

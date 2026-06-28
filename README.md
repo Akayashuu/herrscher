@@ -304,10 +304,41 @@ flowchart TB
 ```
 
 The bridge does **no** gateway I/O: it never reads a channel, posts, or reacts.
+
+### Terminal TUI — multi-session tabbed interface
+
+When `serve` runs on an interactive TTY, the in-tree terminal gateway (a
+Bubbletea TUI) takes over the foreground and brings multiple sessions online as
+a tabbed interface; any configured Discord gateway keeps running headless in the
+background. Each session bound to the terminal appears as a tab; use `Tab` and
+`Shift+Tab` to switch between them. When a background tab receives output from
+the model, it displays a bullet marker (`•`) to indicate unread activity; switching
+to that tab clears the marker. 
+
+**Session management.** Create, list, and close sessions directly from the TUI
+using slash commands — no Discord required. Type `/session create --name foo` to
+spin up a new session; it appears immediately as a new tab. Use `/session list`
+to see active sessions, and `/session close --name foo` to shut one down and remove
+its tab. Sessions are bound to the terminal and isolated by name; typing routes your
+input to the active session and streams replies into its pane.
+
 It is a stateless backend runner driven entirely by the hub's input frames. The
 hub owns the FIFO and connection lifecycle, so if the bridge crashes the
 supervisor restarts it and it re-dials the same socket, resuming with the next
 queued input. Authorization and message-id tracking live in the hub, not here.
+
+**Keybindings.**
+
+| Key | Action |
+|-----|--------|
+| `Tab` / `Shift+Tab` | Switch to next/previous session tab |
+| `Enter` | Send the typed line to the active session (lines starting with `/` are run as commands) |
+| `Ctrl+W` then `y` | Close the active session (any other key cancels) |
+| `?` (empty input) | Toggle keybinding help overlay |
+| `PgUp` / `PgDn` | Scroll the active tab's transcript |
+| `Ctrl+C` / `Esc` | Quit the TUI (shuts down the daemon) |
+
+Tab markers: `•` = unread background activity, `⟳` = streaming. Footer shows active session state (working/idle/disconnected) and last turn cost.
 
 ---
 

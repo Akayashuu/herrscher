@@ -17,6 +17,21 @@ import (
 // for large repos.
 const cloneTimeout = 10 * time.Minute
 
+// maxSessions caps how many sessions can be live at once. Each session mints a
+// worktree and a supervised child process, so an unbounded create loop (e.g. a
+// script driving Dispatch) could exhaust process/disk resources.
+const maxSessions = 64
+
+// channelRef renders a channel reference for operator output. Discord homes use
+// channel-mention markup (<#id>); gateways without it (the terminal TUI) get the
+// bare id, so platform syntax never leaks into the wrong frontend.
+func channelRef(homeType, id string) string {
+	if homeType == "terminal" {
+		return id
+	}
+	return "<#" + id + ">"
+}
+
 // sessionBanner renders the shared context body posted on session create.
 // worktree=="" means no isolated worktree was made; shared distinguishes an
 // explicit shared:true run (main checkout) from a non-git fallback. branch is
@@ -54,6 +69,9 @@ func (h *Handler) sessionCreateRun(ctx context.Context, in contracts.Input) (str
 	}
 	if _, exists := h.st.FindSession(name); exists {
 		return "", fmt.Errorf("session %q already exists", name)
+	}
+	if n := len(h.st.SnapshotSessions()); n >= maxSessions {
+		return "", fmt.Errorf("session limit reached (%d) — close a session before creating another", maxSessions)
 	}
 	home := h.st.Home
 	if home.ID == "" {
@@ -145,7 +163,7 @@ func (h *Handler) sessionCreateRun(ctx context.Context, in contracts.Input) (str
 	title := h.st.QualifiedName(name)
 	var sess state.Session
 	switch home.Type {
-	case "category":
+	case "category", "terminal":
 		chID, err := h.d.CreateUnder(ctx, home.ID, title)
 		if err != nil {
 			rollbackWorktree()
@@ -170,7 +188,7 @@ func (h *Handler) sessionCreateRun(ctx context.Context, in contracts.Input) (str
 	}
 	banner := sessionBanner(repo, name, worktree, h.wt.Branch(name), cmd, shared)
 	_ = h.d.Send(ctx, sess.ChannelID, banner) // best-effort; reply is source of truth
-	return fmt.Sprintf("✅ Running on <#%s>.\n\n%s", sess.ChannelID, banner), nil
+	return fmt.Sprintf("✅ Running on %s.\n\n%s", channelRef(home.Type, sess.ChannelID), banner), nil
 }
 
 func (h *Handler) sessionCloseRun(ctx context.Context, in contracts.Input) (string, error) {
@@ -205,9 +223,10 @@ func (h *Handler) sessionListRun(_ context.Context, _ contracts.Input) (string, 
 	if len(sessions) == 0 {
 		return "No active sessions.", nil
 	}
+	homeType := h.st.Home.Type
 	out := "Active sessions:\n"
 	for _, s := range sessions {
-		out += fmt.Sprintf("• **%s** (%s) <#%s>\n", s.Name, s.Type, s.ChannelID)
+		out += fmt.Sprintf("• **%s** (%s) %s\n", s.Name, s.Type, channelRef(homeType, s.ChannelID))
 	}
 	return out, nil
 }
