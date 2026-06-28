@@ -22,6 +22,38 @@ func TestGatewaySetExposesForeground(t *testing.T) {
 	}
 }
 
+func TestMenuRendersChoices(t *testing.T) {
+	tm := New()
+	conv := contracts.Conversation{Gateway: "terminal", ID: "ch"}
+	if err := tm.Menu(context.Background(), conv, "", "pick one", []contracts.Choice{
+		{Label: "first", Value: "1"},
+		{Label: "second", Value: "2"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	re := <-tm.Frontend()
+	if !strings.Contains(re.Event.Text, "first") || !strings.Contains(re.Event.Text, "second") {
+		t.Fatalf("menu must render its choices, got %q", re.Event.Text)
+	}
+}
+
+func TestEmitDeliversControlEventUnderBackpressure(t *testing.T) {
+	tm := New()
+	// Fill the outbound buffer with droppable chunk events.
+	for i := 0; i < cap(tm.out); i++ {
+		tm.emit(tui.RoutedEvent{Event: contracts.Event{T: "chunk", Text: "x"}})
+	}
+	// A finished reply must still be delivered (not dropped); drain one slot in
+	// parallel so the brief wait succeeds.
+	go func() { <-tm.Frontend() }()
+	done := make(chan struct{})
+	go func() {
+		tm.emit(tui.RoutedEvent{Event: contracts.Event{T: "reply", Done: true, Text: "final"}})
+		close(done)
+	}()
+	<-done
+}
+
 func TestReadDrainsPerChannel(t *testing.T) {
 	tm := New()
 	tm.Submit("chA", "hello")

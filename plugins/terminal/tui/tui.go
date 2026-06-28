@@ -57,6 +57,28 @@ type tab struct {
 	disconnected bool
 }
 
+// maxTabLines bounds a tab's transcript so a long-lived or chatty session
+// (streaming chunk events token-by-token) cannot grow memory without limit.
+const maxTabLines = 5000
+
+// appendLine adds a rendered line to the tab, dropping the oldest lines once the
+// transcript exceeds maxTabLines. Trimming reallocates so the backing array does
+// not pin the whole history in memory.
+func (tb *tab) appendLine(s string) {
+	tb.lines = append(tb.lines, s)
+	if len(tb.lines) > maxTabLines {
+		tb.lines = append([]string(nil), tb.lines[len(tb.lines)-maxTabLines:]...)
+	}
+}
+
+// dispatchResultMsg carries the outcome of a slash-command run off the Update
+// goroutine back into it, so a slow command never freezes the TUI.
+type dispatchResultMsg struct {
+	origin string
+	out    string
+	err    error
+}
+
 type eventMsg RoutedEvent
 
 // tickMsg fires on a periodic timer so the TUI refreshes tabs from the hub.
@@ -77,6 +99,29 @@ type model struct {
 	ready        bool
 	showHelp     bool
 	pendingClose bool
+	width        int
+	height       int
+	flash        string // transient status shown when there is no active tab
+	tabSig       string // last reconciled session signature, to skip idle work
+}
+
+// chromeHeight is the number of non-viewport rows View renders (tab bar, footer,
+// input, spacers) plus the help block when it is shown.
+func (m *model) chromeHeight() int {
+	h := 5
+	if m.showHelp {
+		h += 3
+	}
+	return h
+}
+
+// applySize fits the viewport to the current window minus the chrome.
+func (m *model) applySize() {
+	if !m.ready {
+		return
+	}
+	m.vp.Width = m.width
+	m.vp.Height = m.height - m.chromeHeight()
 }
 
 func newModel(tm Backend) *model {
@@ -146,6 +191,18 @@ func (m *model) syncTabs() {
 	if infos == nil {
 		return
 	}
+	var sb strings.Builder
+	for _, s := range infos {
+		sb.WriteString(s.ChannelID)
+		sb.WriteByte('\x1f')
+		sb.WriteString(s.Name)
+		sb.WriteByte('\n')
+	}
+	sig := sb.String()
+	if sig == m.tabSig {
+		return // session set unchanged since last reconcile
+	}
+	m.tabSig = sig
 	live := map[string]bool{}
 	for _, s := range infos {
 		live[s.ChannelID] = true
@@ -161,50 +218,71 @@ func (m *model) syncTabs() {
 	}
 }
 
-// handleEnter dispatches a /command or submits a prompt to the active tab.
-func (m *model) handleEnter() {
+// handleEnter dispatches a /command or submits a prompt to the active tab. A
+// slash command runs in a returned tea.Cmd (off the Update goroutine) so a slow
+// dispatch — e.g. a clone against an unreachable host — never freezes the TUI;
+// its result is delivered back as a dispatchResultMsg.
+func (m *model) handleEnter() tea.Cmd {
 	text := strings.TrimSpace(m.input.Value())
 	if text == "" {
-		return
+		return nil
 	}
 	m.input.Reset()
 	if strings.HasPrefix(text, "/") {
 		args := strings.Fields(strings.TrimPrefix(text, "/"))
-		out, err := m.tm.Dispatch(args)
-		m.syncTabs()
-		tb := m.tabs[m.active]
-		if tb != nil {
-			line := out
-			if err != nil {
-				line = "error: " + err.Error()
-			}
-			tb.lines = append(tb.lines, statusStyle.Render("· "+line))
-			m.syncViewport()
-		}
-		return
+		return m.dispatchCmd(m.active, args)
 	}
 	if m.active == "" {
-		return
+		return nil
 	}
 	m.tm.Submit(m.active, text)
-	tb := m.tabs[m.active]
-	tb.lines = append(tb.lines, humanStyle.Render("you ")+text)
+	m.tabs[m.active].appendLine(humanStyle.Render("you ") + text)
+	m.syncViewport()
+	return nil
+}
+
+// dispatchCmd runs an operator argv against the backend off the Update goroutine,
+// tagging the result with the tab it was issued from.
+func (m *model) dispatchCmd(origin string, args []string) tea.Cmd {
+	tm := m.tm
+	return func() tea.Msg {
+		out, err := tm.Dispatch(args)
+		return dispatchResultMsg{origin: origin, out: out, err: err}
+	}
+}
+
+// toggleHelp flips the help overlay on/off, resizing the viewport so the help
+// block does not push the chrome off-screen.
+func (m *model) toggleHelp() {
+	m.showHelp = !m.showHelp
+	m.applySize()
 	m.syncViewport()
 }
 
-// toggleHelp flips the help overlay on/off.
-func (m *model) toggleHelp() {
-	m.showHelp = !m.showHelp
+// sessionName resolves a channel id to its logical session name via the hub,
+// returning "" when the session is not (yet) known.
+func (m *model) sessionName(channel string) string {
+	for _, s := range m.tm.Sessions() {
+		if s.ChannelID == channel && s.Name != "" {
+			return s.Name
+		}
+	}
+	return ""
 }
 
-// confirmClose dispatches a close for the active tab's session by label (name).
-func (m *model) confirmClose() {
+// confirmClose dispatches a close for the active tab's session, resolving the
+// real session name (the tab label can still be the channel id before the first
+// reconcile) and surfacing any error through dispatchResultMsg.
+func (m *model) confirmClose() tea.Cmd {
 	tb := m.tabs[m.active]
-	if tb == nil || tb.label == "" {
-		return
+	if tb == nil {
+		return nil
 	}
-	_, _ = m.tm.Dispatch([]string{"session", "close", "--name", tb.label})
-	m.syncTabs()
+	name := m.sessionName(tb.channel)
+	if name == "" {
+		name = tb.label
+	}
+	return m.dispatchCmd(m.active, []string{"session", "close", "--name", name})
 }
 
 func (m *model) switchTab(delta int) {
@@ -222,6 +300,7 @@ func (m *model) switchTab(delta int) {
 	m.active = m.order[idx]
 	m.tabs[m.active].unread = false
 	m.syncViewport()
+	m.vp.GotoBottom() // a freshly switched-to tab starts at its latest output
 }
 
 func (m *model) renderInto(tb *tab, e contracts.Event) {
@@ -232,10 +311,10 @@ func (m *model) renderInto(tb *tab, e contracts.Event) {
 	switch e.T {
 	case "chunk":
 		tb.busy = true
-		tb.lines = append(tb.lines, e.Text)
+		tb.appendLine(e.Text)
 	case "status":
 		tb.busy = true
-		tb.lines = append(tb.lines, statusStyle.Render("· "+e.Text))
+		tb.appendLine(statusStyle.Render("· " + e.Text))
 	case "reply":
 		if e.Done {
 			tb.busy = false
@@ -244,16 +323,16 @@ func (m *model) renderInto(tb *tab, e contracts.Event) {
 			}
 		}
 		if e.Text != "" {
-			tb.lines = append(tb.lines, replyStyle.Render(e.Text))
+			tb.appendLine(replyStyle.Render(e.Text))
 		}
 		if e.Cost > 0 {
-			tb.lines = append(tb.lines, costStyle.Render(formatCost(e.Cost)))
+			tb.appendLine(costStyle.Render(formatCost(e.Cost)))
 		}
 	case "reset":
-		tb.lines = append(tb.lines, statusStyle.Render("· (turn reset)"))
+		tb.appendLine(statusStyle.Render("· (turn reset)"))
 	case "abandoned":
 		tb.disconnected = true
-		tb.lines = append(tb.lines, statusStyle.Render("· (turn abandoned)"))
+		tb.appendLine(statusStyle.Render("· (turn abandoned)"))
 	}
 }
 
@@ -266,8 +345,14 @@ func (m *model) syncViewport() {
 		m.vp.SetContent("")
 		return
 	}
+	// Preserve the operator's scroll position: only snap to the bottom when the
+	// view is already there, so streaming output into the active tab does not
+	// defeat PgUp/PgDn scrollback mid-turn.
+	atBottom := m.vp.AtBottom()
 	m.vp.SetContent(strings.Join(tb.lines, "\n"))
-	m.vp.GotoBottom()
+	if atBottom {
+		m.vp.GotoBottom()
+	}
 }
 
 // tabBar renders the tab strip: active tab highlighted, unread marked with •, busy with ⟳.
@@ -349,23 +434,23 @@ func (m *model) Init() tea.Cmd { return tea.Batch(textinput.Blink, tickCmd()) }
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
 		if !m.ready {
-			m.vp = viewport.New(msg.Width, msg.Height-5)
+			m.vp = viewport.New(msg.Width, msg.Height-m.chromeHeight())
 			m.ready = true
-			m.syncViewport()
 		} else {
-			m.vp.Width = msg.Width
-			m.vp.Height = msg.Height - 5
-			m.syncViewport()
+			m.applySize()
 		}
 		m.input.Width = msg.Width - 2
+		m.syncViewport()
 	case tea.KeyMsg:
+		m.flash = "" // any keypress clears a transient status
 		// Two-step close confirm: if waiting for confirmation, next key decides.
 		if m.pendingClose {
 			if msg.String() == "y" {
-				m.confirmClose()
+				cmd := m.confirmClose()
 				m.pendingClose = false
-				return m, nil
+				return m, cmd
 			}
 			// Quit keys always quit, even during pending close.
 			if msg.Type == tea.KeyCtrlC || msg.Type == tea.KeyEsc {
@@ -386,7 +471,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.switchTab(-1)
 			return m, nil
 		case tea.KeyEnter:
-			m.handleEnter()
+			return m, m.handleEnter()
 		case tea.KeyCtrlW:
 			m.pendingClose = true
 			return m, nil
@@ -399,6 +484,25 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// PgUp/PgDn reach m.vp.Update(msg) below — not intercepted here.
 	case eventMsg:
 		m.route(RoutedEvent(msg))
+	case dispatchResultMsg:
+		m.syncTabs()
+		line := msg.out
+		if msg.err != nil {
+			line = "error: " + msg.err.Error()
+		}
+		if line != "" {
+			tb := m.tabs[msg.origin]
+			if tb == nil {
+				tb = m.tabs[m.active]
+			}
+			if tb != nil {
+				tb.appendLine(statusStyle.Render("· " + line))
+				m.syncViewport()
+			} else {
+				m.flash = line // no tab to render into — surface it standalone
+			}
+		}
+		return m, nil
 	case tickMsg:
 		m.syncTabs()
 		return m, tickCmd()
@@ -430,6 +534,10 @@ func (m *model) View() string {
 	if m.showHelp {
 		parts = append(parts, m.helpView())
 	}
-	parts = append(parts, m.tabBar(), m.vp.View(), m.footer(), m.input.View())
+	footer := m.footer()
+	if m.flash != "" {
+		footer = statusStyle.Render("· " + m.flash)
+	}
+	parts = append(parts, m.tabBar(), m.vp.View(), footer, m.input.View())
 	return strings.Join(parts, "\n")
 }

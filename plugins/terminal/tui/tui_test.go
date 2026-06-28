@@ -10,6 +10,15 @@ import (
 
 func newTestModel() *model { return newModel(nil) }
 
+// runCmd executes a tea.Cmd (and any single follow-up message) so tests can
+// drive commands that now run off the Update loop. Nil is a no-op.
+func runCmd(cmd tea.Cmd) tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	return cmd()
+}
+
 func TestRoutedEventLandsInOwnTab(t *testing.T) {
 	m := newTestModel()
 	m.route(RoutedEvent{Conv: contracts.Conversation{ID: "a"}, Event: contracts.Event{T: "chunk", Text: "hello-a"}})
@@ -97,7 +106,7 @@ func TestSlashLineDispatches(t *testing.T) {
 	m := newModel(f)
 	m.ensureTab("a")
 	m.input.SetValue("/session list")
-	m.handleEnter()
+	runCmd(m.handleEnter())
 	if len(f.dispatched) != 1 || f.dispatched[0][0] != "session" {
 		t.Fatalf("slash line not dispatched: %+v", f.dispatched)
 	}
@@ -108,7 +117,7 @@ func TestPlainLineSubmits(t *testing.T) {
 	m := newModel(f)
 	m.ensureTab("a")
 	m.input.SetValue("hello world")
-	m.handleEnter()
+	runCmd(m.handleEnter())
 	if len(f.dispatched) != 0 {
 		t.Fatalf("plain line must not dispatch: %+v", f.dispatched)
 	}
@@ -166,6 +175,20 @@ func TestResizeSyncsViewport(t *testing.T) {
 	}
 }
 
+func TestHelpReducesViewportHeight(t *testing.T) {
+	m := newModel(&fakeBackend{})
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	base := m.vp.Height
+	m.toggleHelp()
+	if m.vp.Height != base-3 {
+		t.Fatalf("help must shrink viewport by the 3-line help block: base=%d now=%d", base, m.vp.Height)
+	}
+	m.toggleHelp()
+	if m.vp.Height != base {
+		t.Fatalf("hiding help must restore viewport height: base=%d now=%d", base, m.vp.Height)
+	}
+}
+
 func TestHelpToggle(t *testing.T) {
 	m := newModel(&fakeBackend{})
 	if m.showHelp {
@@ -183,7 +206,7 @@ func TestCloseActiveDispatchesClose(t *testing.T) {
 	tb := m.ensureTab("terminal/alpha-1")
 	tb.label = "alpha"
 	m.active = "terminal/alpha-1"
-	m.confirmClose() // simulate confirmed close
+	runCmd(m.confirmClose()) // simulate confirmed close
 	if len(f.dispatched) != 1 {
 		t.Fatalf("close not dispatched: %+v", f.dispatched)
 	}

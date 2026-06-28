@@ -50,6 +50,8 @@ type Terminal struct {
 
 	ctrlMu sync.Mutex
 	ctrl   contracts.SessionControl // set by BindSessionControl; nil-safe here
+
+	baseCtx context.Context // the foreground lifetime; scopes operator dispatches
 }
 
 var (
@@ -109,6 +111,9 @@ func (t *Terminal) bootstrapDefaultSession(ctx context.Context) {
 // composition root runs this for the one bound gateway that implements
 // Foreground, on an interactive TTY only.
 func (t *Terminal) RunForeground(ctx context.Context, cancel context.CancelFunc) error {
+	t.ctrlMu.Lock()
+	t.baseCtx = ctx
+	t.ctrlMu.Unlock()
 	t.bootstrapDefaultSession(ctx)
 	return tui.Run(ctx, cancel, t)
 }
@@ -187,7 +192,11 @@ func (t *Terminal) React(context.Context, contracts.Conversation, contracts.Mess
 }
 
 func (t *Terminal) Menu(_ context.Context, conv contracts.Conversation, _ contracts.MessageID, prompt string, opts []contracts.Choice) error {
-	t.EmitTo(conv, contracts.Event{T: "status", Text: prompt})
+	text := prompt
+	for _, o := range opts {
+		text += "\n  • " + o.Value + " — " + o.Label
+	}
+	t.EmitTo(conv, contracts.Event{T: "status", Text: text})
 	return nil
 }
 
@@ -209,7 +218,18 @@ func (t *Terminal) Emit(e contracts.Event) {
 func (t *Terminal) emit(re tui.RoutedEvent) {
 	select {
 	case t.out <- re:
-	default: // TUI not draining fast enough → drop rather than block the hub
+		return
+	default:
+	}
+	// High-volume chunk/status events are dropped rather than block the hub when
+	// the TUI lags. A finished reply or a channel close carries terminal state
+	// (clears the busy marker, removes the tab) the TUI must not miss, so wait
+	// briefly for room before giving up.
+	if re.Event.T == "closed" || (re.Event.T == "reply" && re.Event.Done) {
+		select {
+		case t.out <- re:
+		case <-time.After(2 * time.Second):
+		}
 	}
 }
 
@@ -264,11 +284,16 @@ func withTerminalDefault(args []string) []string {
 // --terminal_only when creating a session without an explicit gateway selector
 // so TUI-created sessions bind to this terminal and appear as tabs.
 func (t *Terminal) Dispatch(args []string) (string, error) {
-	c := t.Control()
+	t.ctrlMu.Lock()
+	c, ctx := t.ctrl, t.baseCtx
+	t.ctrlMu.Unlock()
 	if c == nil {
 		return "", fmt.Errorf("session control not bound")
 	}
-	return c.Dispatch(context.Background(), withTerminalDefault(args))
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return c.Dispatch(ctx, withTerminalDefault(args))
 }
 
 // --- contracts.ChannelAdmin: synthetic, terminal-local channels ---
