@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	contracts "github.com/Herrscherd/herrscher-contracts"
 	"github.com/Herrscherd/herrscher/plugins/terminal/tui"
@@ -52,6 +53,26 @@ func TestEmitDeliversControlEventUnderBackpressure(t *testing.T) {
 		close(done)
 	}()
 	<-done
+}
+
+func TestBootstrapWaitsForBindThenCreates(t *testing.T) {
+	tm := New()
+	fake := &fakeSessionControl{}
+	done := make(chan struct{})
+	go func() {
+		tm.bootstrapDefaultSession(context.Background())
+		close(done)
+	}()
+	// Bind after a beat: the ready signal must wake the bootstrap immediately.
+	tm.BindSessionControl(fake)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("bootstrap did not return after bind")
+	}
+	if len(fake.lastArgs) < 2 || fake.lastArgs[1] != "create" {
+		t.Fatalf("bootstrap did not create a default session: %v", fake.lastArgs)
+	}
 }
 
 func TestReadDrainsPerChannel(t *testing.T) {

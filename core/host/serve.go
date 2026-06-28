@@ -185,9 +185,10 @@ func RunHub(ctx context.Context, gws []Deps, o Options) error {
 	// The hub owns the live session set and the runtime command seam: the boot
 	// loop and any gateway-driven create/close both go through it, so a session
 	// added at runtime is wired exactly like one loaded here. The handler behind
-	// the registry uses the first gateway's channel admin to create/archive
-	// session channels.
-	reg, err := buildRegistry(ctx, Deps{Admin: firstAdmin(gws)}, o, st, sup, instID)
+	// the registry creates/archives session channels through the channel admin of
+	// the gateway that owns the home, so a terminal home is never minted by Discord
+	// (nor vice-versa) when both gateways are present.
+	reg, err := buildRegistry(ctx, Deps{Admin: adminForHome(gws, st.Home)}, o, st, sup, instID)
 	if err != nil {
 		return fmt.Errorf("build command registry: %w", err)
 	}
@@ -306,6 +307,24 @@ func firstAdmin(gws []Deps) contracts.ChannelAdmin {
 		}
 	}
 	return nil
+}
+
+// adminForHome returns the ChannelAdmin of the gateway that owns the home, so a
+// session channel is minted on the same platform as its home. The terminal home
+// maps to the terminal gateway; a Discord category/forum home maps to a
+// non-terminal gateway. Falls back to the first available admin when no gateway
+// matches (e.g. an unset home, or only one admin present).
+func adminForHome(gws []Deps, home state.HomeRef) contracts.ChannelAdmin {
+	wantTerminal := home.Type == "terminal"
+	for _, g := range gws {
+		if g.Admin == nil || g.Gateway == nil {
+			continue
+		}
+		if (g.Gateway.Manifest().Kind == "terminal") == wantTerminal {
+			return g.Admin
+		}
+	}
+	return firstAdmin(gws)
 }
 
 // firstReader returns the first gateway's ChannelReader (nil if none expose one).

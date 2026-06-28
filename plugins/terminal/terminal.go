@@ -48,8 +48,10 @@ type Terminal struct {
 	nextID  int
 	out     chan tui.RoutedEvent
 
-	ctrlMu sync.Mutex
-	ctrl   contracts.SessionControl // set by BindSessionControl; nil-safe here
+	ctrlMu    sync.Mutex
+	ctrl      contracts.SessionControl // set by BindSessionControl; nil-safe here
+	ctrlReady chan struct{}            // closed once ctrl is bound
+	bindOnce  sync.Once                // guards the close of ctrlReady
 
 	baseCtx context.Context // the foreground lifetime; scopes operator dispatches
 }
@@ -79,28 +81,21 @@ func ensureDefaultSession(ctx context.Context, c contracts.SessionControl) error
 	return err
 }
 
-// bootstrapDefaultSession waits briefly for the host to bind SessionControl
-// (RunHub binds it from a background goroutine after the TUI may have started),
-// then ensures a default session exists. Never blocks forever: if ctrl isn't
-// bound within ~5 s, or ctx is cancelled, it returns silently so the TUI still
-// launches. A failed bootstrap is best-effort and must not stop the TUI.
+// bootstrapDefaultSession waits for the host to bind SessionControl (RunHub binds
+// it from a background goroutine after the TUI may have started), then ensures a
+// default session exists. It blocks on the ctrlReady signal rather than polling,
+// so a slow bind is picked up the instant it lands. Never blocks forever: if the
+// bind doesn't arrive within ~5 s, or ctx is cancelled, it returns silently so
+// the TUI still launches. A failed bootstrap is best-effort and must not stop it.
 func (t *Terminal) bootstrapDefaultSession(ctx context.Context) {
-	ticker := time.NewTicker(50 * time.Millisecond)
-	defer ticker.Stop()
-	deadline := time.After(5 * time.Second)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-deadline:
-			return
-		case <-ticker.C:
-			c := t.Control()
-			if c == nil {
-				continue
-			}
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(5 * time.Second):
+		return
+	case <-t.ctrlReady:
+		if c := t.Control(); c != nil {
 			_ = ensureDefaultSession(ctx, c) // best-effort; error silently ignored
-			return
 		}
 	}
 }
@@ -120,7 +115,11 @@ func (t *Terminal) RunForeground(ctx context.Context, cancel context.CancelFunc)
 
 // New builds an unbound terminal gateway.
 func New() *Terminal {
-	return &Terminal{pending: map[string][]contracts.Message{}, out: make(chan tui.RoutedEvent, 256)}
+	return &Terminal{
+		pending:   map[string][]contracts.Message{},
+		out:       make(chan tui.RoutedEvent, 256),
+		ctrlReady: make(chan struct{}),
+	}
 }
 
 // Submit enqueues a line the user typed in the TUI as an inbound message on the
@@ -251,6 +250,7 @@ func (t *Terminal) BindSessionControl(c contracts.SessionControl) {
 	t.ctrlMu.Lock()
 	t.ctrl = c
 	t.ctrlMu.Unlock()
+	t.bindOnce.Do(func() { close(t.ctrlReady) })
 }
 
 // Control exposes the bound SessionControl to the TUI (nil before bind).
