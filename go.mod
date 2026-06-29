@@ -8,7 +8,7 @@ require (
 	github.com/Herrscherd/herrscher-discord-gateway v0.2.2
 	github.com/Herrscherd/herrscher-obsidian-memory v0.1.1
 	github.com/Herrscherd/herrscher-orchestrator v0.1.4
-	github.com/Herrscherd/herrscher-transport v0.1.4
+	github.com/Herrscherd/herrscher-transport v0.1.5
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
