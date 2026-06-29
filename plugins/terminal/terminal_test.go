@@ -227,6 +227,45 @@ func TestDispatchPassesThroughNonCreate(t *testing.T) {
 	}
 }
 
+func TestDispatchRejectsNonSessionVerbs(t *testing.T) {
+	// The TUI forwards any /-verb to Dispatch; gate the seam so daemon-management
+	// verbs (which could restart the host the TUI runs in, or rewrite its config)
+	// are never reachable from the terminal. Only session-scoped verbs pass.
+	for _, argv := range [][]string{
+		{"service", "restart"},
+		{"service", "update"},
+		{"set", "home", "--id", "x"},
+	} {
+		tm := New()
+		fake := &fakeSessionControl{}
+		tm.BindSessionControl(fake)
+		if _, err := tm.Dispatch(argv); err == nil {
+			t.Fatalf("Dispatch(%v) should be rejected from the terminal", argv)
+		}
+		if fake.lastArgs != nil {
+			t.Fatalf("rejected verb must not reach SessionControl; got args: %v", fake.lastArgs)
+		}
+	}
+}
+
+func TestDispatchAllowsSessionAndAgentVerbs(t *testing.T) {
+	for _, argv := range [][]string{
+		{"session", "list"},
+		{"session", "close", "--name", "x"},
+		{"agent", "list"},
+	} {
+		tm := New()
+		fake := &fakeSessionControl{}
+		tm.BindSessionControl(fake)
+		if _, err := tm.Dispatch(argv); err != nil {
+			t.Fatalf("Dispatch(%v) should be allowed: %v", argv, err)
+		}
+		if fake.lastArgs == nil {
+			t.Fatalf("allowed verb %v must reach SessionControl", argv)
+		}
+	}
+}
+
 // --- ensureDefaultSession ---
 
 func TestEnsureDefaultSessionCreatesWhenNone(t *testing.T) {

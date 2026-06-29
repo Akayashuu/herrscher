@@ -280,10 +280,25 @@ func withTerminalDefault(args []string) []string {
 	return append(out, "--terminal_only")
 }
 
+// terminalVerbs is the allow-list of command groups reachable from the TUI. The
+// terminal drives session lifecycle and its companion agents; daemon-management
+// verbs (service restart/update — which would tear down the host the TUI runs
+// in — and set home/source, which rewrites its routing config) are deliberately
+// out of reach, so a future destructive verb can never be typed into a tab.
+var terminalVerbs = map[string]bool{"session": true, "agent": true}
+
 // Dispatch forwards an operator argv to the bound SessionControl, prepending
 // --terminal_only when creating a session without an explicit gateway selector
-// so TUI-created sessions bind to this terminal and appear as tabs.
+// so TUI-created sessions bind to this terminal and appear as tabs. The first
+// token is gated against terminalVerbs before it ever reaches the registry.
 func (t *Terminal) Dispatch(args []string) (string, error) {
+	if len(args) == 0 || !terminalVerbs[args[0]] {
+		verb := ""
+		if len(args) > 0 {
+			verb = args[0]
+		}
+		return "", fmt.Errorf("command %q is not available from the terminal (allowed: session, agent)", verb)
+	}
 	t.ctrlMu.Lock()
 	c, ctx := t.ctrl, t.baseCtx
 	t.ctrlMu.Unlock()
