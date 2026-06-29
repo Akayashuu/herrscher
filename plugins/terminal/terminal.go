@@ -77,7 +77,7 @@ func ensureDefaultSession(ctx context.Context, c contracts.SessionControl) error
 			}
 		}
 	}
-	_, err := c.Dispatch(ctx, []string{"session", "create", "--name", "main", "--terminal_only", "--shared"})
+	_, err := c.Create(ctx, contracts.CreateSession{Name: "main", TerminalOnly: true, Shared: true})
 	return err
 }
 
@@ -311,6 +311,21 @@ func (t *Terminal) Dispatch(args []string) (string, error) {
 	return c.Dispatch(ctx, withTerminalDefault(args))
 }
 
+// Close tears a session down through the typed SessionControl seam, so the TUI's
+// close action never assembles "session close" flag argv.
+func (t *Terminal) Close(name string, force bool) (string, error) {
+	t.ctrlMu.Lock()
+	c, ctx := t.ctrl, t.baseCtx
+	t.ctrlMu.Unlock()
+	if c == nil {
+		return "", fmt.Errorf("session control not bound")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return c.Close(ctx, name, force)
+}
+
 // --- contracts.ChannelAdmin: synthetic, terminal-local channels ---
 
 func (t *Terminal) Kind(_ context.Context, _ string) (string, error) { return "text", nil }
@@ -335,6 +350,10 @@ func (t *Terminal) Send(_ context.Context, channelID, content string) error {
 	t.EmitTo(contracts.Conversation{Gateway: "terminal", ID: channelID}, contracts.Event{T: "status", Text: content})
 	return nil
 }
+
+// ChannelRef renders a terminal channel id bare: a plain TUI has no mention
+// markup, so the operator just sees the id.
+func (t *Terminal) ChannelRef(id string) string { return id }
 
 // slug lowercases and replaces unsafe runes so a channel id stays path-safe.
 func slug(s string) string {

@@ -45,8 +45,43 @@ func (f *fakeChannelAdmin) Send(ctx context.Context, channelID, content string) 
 	return nil
 }
 
+// ChannelRef renders a sentinel so tests can prove the manager delegates the
+// channel-reference syntax to the gateway instead of switching on home type.
+func (f *fakeChannelAdmin) ChannelRef(id string) string { return "REF(" + id + ")" }
+
 func TestChannelAdminInterfaceHasSend(t *testing.T) {
 	var _ channelAdmin = (*fakeChannelAdmin)(nil)
+}
+
+// The manager must render channel references through the gateway's own
+// ChannelRef (OCP: a new platform adds rendering without editing core), never
+// by switching on the home type string.
+func TestSessionListUsesGatewayChannelRef(t *testing.T) {
+	h, d, _, _, _, st := newTestHandler(t, "category")
+	st.SetHome(state.HomeRef{ID: "cat1", Type: "category"})
+	if _, err := h.sessionCreateRun(context.Background(), args("name", "demo")); err != nil {
+		t.Fatal(err)
+	}
+	out, err := h.sessionListRun(context.Background(), contracts.Input{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := d.ChannelRef("new-demo")
+	if !strings.Contains(out, want) {
+		t.Fatalf("list output %q must render the gateway channel ref %q", out, want)
+	}
+}
+
+func TestSessionCreateUsesGatewayChannelRef(t *testing.T) {
+	h, d, _, _, _, st := newTestHandler(t, "category")
+	st.SetHome(state.HomeRef{ID: "cat1", Type: "category"})
+	out, err := h.sessionCreateRun(context.Background(), args("name", "demo"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, d.ChannelRef("new-demo")) {
+		t.Fatalf("create output %q must render the gateway channel ref", out)
+	}
 }
 
 type fakeSup struct{ started, stopped []string }
@@ -362,7 +397,7 @@ func TestSessionCreateBanner(t *testing.T) {
 			wtPath:   "/wt/x",
 			shared:   false,
 			wantReply: []string{
-				"✅ Running on <#new-demo>.",
+				"✅ Running on REF(new-demo).",
 				"Mode: isolated worktree",
 				"Worktree: `/wt/x`",
 				"Branch: `session/demo`",
@@ -377,7 +412,7 @@ func TestSessionCreateBanner(t *testing.T) {
 			wtPath:   "",
 			shared:   false,
 			wantReply: []string{
-				"✅ Running on <#new-demo>.",
+				"✅ Running on REF(new-demo).",
 				"Mode: shared (not a git repo)",
 			},
 			wantSend: []string{"Mode: shared (not a git repo)"},
@@ -401,7 +436,7 @@ func TestSessionCreateBanner(t *testing.T) {
 			wtPath:   "/wt/x",
 			shared:   false,
 			wantReply: []string{
-				"✅ Running on <#post-demo>.",
+				"✅ Running on REF(post-demo).",
 				"Mode: isolated worktree",
 			},
 			wantSend: []string{"Mode: isolated worktree"},

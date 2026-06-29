@@ -23,6 +23,9 @@ type channelAdmin interface {
 	ForumPost(ctx context.Context, forumID, name, content string) (channelID string, err error)
 	Archive(ctx context.Context, id string) error
 	Send(ctx context.Context, channelID, content string) error
+	// ChannelRef renders a channel id as this platform's operator-facing
+	// reference, so the manager never switches on home type to format it.
+	ChannelRef(id string) string
 }
 
 // supervisor starts/stops the bridge process backing a session.

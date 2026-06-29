@@ -36,6 +36,9 @@ type Backend interface {
 	Submit(channel, text string)
 	Sessions() []contracts.SessionInfo
 	Dispatch(args []string) (string, error)
+	// Close tears a session down by name through the typed control seam, so the
+	// UI's close action never assembles "session close" flag argv.
+	Close(name string, force bool) (string, error)
 }
 
 var (
@@ -282,7 +285,11 @@ func (m *model) confirmClose() tea.Cmd {
 	if name == "" {
 		name = tb.label
 	}
-	return m.dispatchCmd(m.active, []string{"session", "close", "--name", name})
+	origin, tm := m.active, m.tm
+	return func() tea.Msg {
+		out, err := tm.Close(name, false)
+		return dispatchResultMsg{origin: origin, out: out, err: err}
+	}
 }
 
 func (m *model) switchTab(delta int) {

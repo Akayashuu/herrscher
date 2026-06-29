@@ -51,6 +51,35 @@ func (r *Registry) Dispatch(ctx context.Context, args []string) (string, error) 
 	return cmd.Run(ctx, in)
 }
 
+// Run invokes the command at an exact path with a pre-built Input, skipping argv
+// parsing. It is the typed seam for programmatic callers (e.g. the hub's typed
+// SessionControl methods) so they never assemble stringly-typed flag argv that
+// could silently drift from the declared params. Required params are still
+// checked, so a typed caller gets the same validation as the CLI.
+func (r *Registry) Run(ctx context.Context, path []string, in contracts.Input) (string, error) {
+	var cmd *contracts.Cmd
+	for i := range r.cmds {
+		if key(r.cmds[i].Path) == key(path) {
+			cmd = &r.cmds[i]
+			break
+		}
+	}
+	if cmd == nil {
+		return "", fmt.Errorf("unknown command %q", key(path))
+	}
+	if in.Args == nil {
+		in.Args = map[string]string{}
+	}
+	for _, p := range cmd.Params {
+		if p.Required {
+			if _, ok := in.Args[p.Name]; !ok {
+				return "", fmt.Errorf("%s: missing required --%s", key(cmd.Path), p.Name)
+			}
+		}
+	}
+	return cmd.Run(ctx, in)
+}
+
 // match finds the command whose Path is the longest prefix of args.
 func (r *Registry) match(args []string) (*contracts.Cmd, []string) {
 	var best *contracts.Cmd
