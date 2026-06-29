@@ -2,10 +2,10 @@ github.com/Herrscherd/dctl v1.1.0 h1:8CWTzhmv6U0KzZhJ0XrfHmZOn4+ZKMDY9tOLg6P2thQ
 github.com/Herrscherd/dctl v1.1.0/go.mod h1:43yI1s+IzYjP0MPwkkN3rTKrBgXxqA2t7W6bkIjdiPA=
 github.com/Herrscherd/herrscher-claude-backend v0.1.1 h1:fM3tOq4jPP3Svm44ahR2zcNbXv3gRNR77DXDFNj1avQ=
 github.com/Herrscherd/herrscher-claude-backend v0.1.1/go.mod h1:fqCQ3PetvxglOa1z6SrJUBA1skI/eDX071jq2xcHAvY=
-github.com/Herrscherd/herrscher-contracts v0.1.7 h1:MNKieGmiiPw6zASRD0Sn5eMsyLM7m7/LKYRfq7f7Mv0=
-github.com/Herrscherd/herrscher-contracts v0.1.7/go.mod h1:LM6PwTwJwF4+uVjeqIGFhWZOaQbLPtUxyhjD9ji+NmI=
-github.com/Herrscherd/herrscher-discord-gateway v0.2.2 h1:2COzm+RhIbT4PWtWQQQE2y5EKWuwZpPZnzsgaQlL47c=
-github.com/Herrscherd/herrscher-discord-gateway v0.2.2/go.mod h1:e3s3er0ntNO0aq4xFWK0RwMqNLbYvtRuXYq0YwhwOh0=
+github.com/Herrscherd/herrscher-contracts v0.1.8 h1:cr88CFAoj+znIGKs3rrUHhLcQvLwASJSyfv48WT66pA=
+github.com/Herrscherd/herrscher-contracts v0.1.8/go.mod h1:LM6PwTwJwF4+uVjeqIGFhWZOaQbLPtUxyhjD9ji+NmI=
+github.com/Herrscherd/herrscher-discord-gateway v0.2.3 h1:csLivNylLYaNVNeFIy4/mhTBGEN8N61W8D4VSHlTyGo=
+github.com/Herrscherd/herrscher-discord-gateway v0.2.3/go.mod h1:QtMiJDmFn22q1tlgdOSbRyoDQqFTUahHHe13FJTbjuk=
 github.com/Herrscherd/herrscher-obsidian-memory v0.1.1 h1:zs4eXE86vwJkJxFdjCt1wpKbb1ksW44pSibqyF5HDJg=
 github.com/Herrscherd/herrscher-obsidian-memory v0.1.1/go.mod h1:ntKFiYHtNYbr6igBgOfCK7xJE3H4Om5DZPTdCX6EbqQ=
 github.com/Herrscherd/herrscher-orchestrator v0.1.4 h1:S0re6g7UxdCKY515oYjqSx1M+IuLyPpRAI0vlVg6pv4=

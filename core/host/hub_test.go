@@ -4,10 +4,94 @@ import (
 	"context"
 	"testing"
 
+	contracts "github.com/Herrscherd/herrscher-contracts"
 	"github.com/Herrscherd/herrscher/core/cli"
 	"github.com/Herrscherd/herrscher/core/internal/state"
 	"github.com/Herrscherd/herrscher/core/internal/supervisor"
 )
+
+// hubWith builds a hub over a registry holding one recording command at path, so
+// a test can assert how the hub's typed methods map a spec into a typed Input
+// without standing up the whole session machinery.
+func hubWith(t *testing.T, path []string, got *contracts.Input) *hub {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	st := state.NewState(t.TempDir() + "/s.json")
+	sup := supervisor.NewSupervisor(ctx, "/nonexistent/herrscher")
+	var r cli.Registry
+	cmd := contracts.New(path...).Param("name", "", true).
+		Do(func(_ context.Context, in contracts.Input) (string, error) {
+			*got = in
+			return "ok", nil
+		})
+	if err := r.Add(cmd); err != nil {
+		t.Fatal(err)
+	}
+	return newHub(ctx, st, sup, nil, t.TempDir(), &r, nil)
+}
+
+// Create maps the typed CreateSession into the flags the session-create command
+// declares, so a renamed field is a compile error, not a silent argv typo.
+func TestHubCreateMapsSpecToTypedInput(t *testing.T) {
+	var got contracts.Input
+	h := hubWith(t, []string{"session", "create"}, &got)
+	if _, err := h.Create(context.Background(), contracts.CreateSession{
+		Name: "main", Project: "alpha", Gateways: []string{"discord", "terminal"},
+		TerminalOnly: true, Shared: true, Agent: "bishop", ConsolidateEvery: 3,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got.Get("name") != "main" || got.Get("project") != "alpha" || got.Get("agent") != "bishop" {
+		t.Fatalf("string fields not mapped: %+v", got.Args)
+	}
+	if got.Get("gateways") != "discord,terminal" {
+		t.Fatalf("gateways not joined: %q", got.Get("gateways"))
+	}
+	if !got.Bool("terminal_only") || !got.Bool("shared") {
+		t.Fatalf("bool flags not mapped: %+v", got.Args)
+	}
+	if got.Get("consolidate_every") != "3" {
+		t.Fatalf("consolidate_every not mapped: %q", got.Get("consolidate_every"))
+	}
+}
+
+// An omitted optional field must not appear in the Input, so it stays "flag
+// unset" rather than an empty-string value the command might misread.
+func TestHubCreateOmitsUnsetFields(t *testing.T) {
+	var got contracts.Input
+	h := hubWith(t, []string{"session", "create"}, &got)
+	if _, err := h.Create(context.Background(), contracts.CreateSession{Name: "main"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"project", "gateways", "agent", "shared", "terminal_only", "consolidate_every"} {
+		if _, ok := got.Args[k]; ok {
+			t.Fatalf("unset field %q must be absent, got %q", k, got.Args[k])
+		}
+	}
+}
+
+func TestHubCloseMapsNameAndForce(t *testing.T) {
+	var got contracts.Input
+	h := hubWith(t, []string{"session", "close"}, &got)
+	if _, err := h.Close(context.Background(), "demo", true); err != nil {
+		t.Fatal(err)
+	}
+	if got.Get("name") != "demo" || !got.Bool("force") {
+		t.Fatalf("close did not map name/force: %+v", got.Args)
+	}
+}
+
+func TestHubCloseOmitsForceWhenFalse(t *testing.T) {
+	var got contracts.Input
+	h := hubWith(t, []string{"session", "close"}, &got)
+	if _, err := h.Close(context.Background(), "demo", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got.Args["force"]; ok {
+		t.Fatalf("force must be absent when false: %+v", got.Args)
+	}
+}
 
 // Dispatch routes a neutral argv through the real command registry the daemon
 // builds, proving the seam a gateway uses is wired to the manager commands.

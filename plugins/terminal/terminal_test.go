@@ -70,8 +70,8 @@ func TestBootstrapWaitsForBindThenCreates(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("bootstrap did not return after bind")
 	}
-	if len(fake.lastArgs) < 2 || fake.lastArgs[1] != "create" {
-		t.Fatalf("bootstrap did not create a default session: %v", fake.lastArgs)
+	if len(fake.created) != 1 {
+		t.Fatalf("bootstrap did not create a default session: %+v", fake.created)
 	}
 }
 
@@ -174,13 +174,30 @@ func TestGatewaySetExposesAdmin(t *testing.T) {
 
 // fakeSessionControl is a minimal contracts.SessionControl for Dispatch and
 // ensureDefaultSession tests.
+type closeCall struct {
+	name  string
+	force bool
+}
+
 type fakeSessionControl struct {
 	lastArgs []string
 	sessions []contracts.SessionInfo
+	created  []contracts.CreateSession
+	closed   []closeCall
 }
 
 func (f *fakeSessionControl) Dispatch(_ context.Context, args []string) (string, error) {
 	f.lastArgs = args
+	return "ok", nil
+}
+
+func (f *fakeSessionControl) Create(_ context.Context, spec contracts.CreateSession) (string, error) {
+	f.created = append(f.created, spec)
+	return "ok", nil
+}
+
+func (f *fakeSessionControl) Close(_ context.Context, name string, force bool) (string, error) {
+	f.closed = append(f.closed, closeCall{name: name, force: force})
 	return "ok", nil
 }
 
@@ -273,23 +290,18 @@ func TestEnsureDefaultSessionCreatesWhenNone(t *testing.T) {
 	if err := ensureDefaultSession(context.Background(), fake); err != nil {
 		t.Fatalf("ensureDefaultSession: %v", err)
 	}
-	if len(fake.lastArgs) < 2 || fake.lastArgs[0] != "session" || fake.lastArgs[1] != "create" {
-		t.Fatalf("expected session create, got: %v", fake.lastArgs)
+	if len(fake.created) != 1 {
+		t.Fatalf("expected one typed Create, got: %+v", fake.created)
 	}
-	hasTerminalOnly, hasName := false, false
-	for _, a := range fake.lastArgs {
-		if a == "--terminal_only" {
-			hasTerminalOnly = true
-		}
-		if a == "main" {
-			hasName = true
-		}
+	spec := fake.created[0]
+	if spec.Name != "main" {
+		t.Fatalf("default session name = %q, want main", spec.Name)
 	}
-	if !hasTerminalOnly {
-		t.Fatalf("--terminal_only missing from args: %v", fake.lastArgs)
+	if !spec.TerminalOnly {
+		t.Fatalf("default session must be terminal-only: %+v", spec)
 	}
-	if !hasName {
-		t.Fatalf("--name main missing from args: %v", fake.lastArgs)
+	if !spec.Shared {
+		t.Fatalf("default session must be shared: %+v", spec)
 	}
 }
 
@@ -302,8 +314,8 @@ func TestEnsureDefaultSessionSkipsWhenTerminalExists(t *testing.T) {
 	if err := ensureDefaultSession(context.Background(), fake); err != nil {
 		t.Fatalf("ensureDefaultSession: %v", err)
 	}
-	if fake.lastArgs != nil {
-		t.Fatalf("Dispatch must not be called when a terminal session exists; got args: %v", fake.lastArgs)
+	if fake.created != nil {
+		t.Fatalf("Create must not be called when a terminal session exists; got: %+v", fake.created)
 	}
 }
 
@@ -316,7 +328,7 @@ func TestEnsureDefaultSessionCreatesWhenOnlyDiscord(t *testing.T) {
 	if err := ensureDefaultSession(context.Background(), fake); err != nil {
 		t.Fatalf("ensureDefaultSession: %v", err)
 	}
-	if len(fake.lastArgs) < 2 || fake.lastArgs[0] != "session" || fake.lastArgs[1] != "create" {
-		t.Fatalf("expected session create when only discord session exists; got: %v", fake.lastArgs)
+	if len(fake.created) != 1 {
+		t.Fatalf("expected a typed Create when only discord session exists; got: %+v", fake.created)
 	}
 }

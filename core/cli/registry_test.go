@@ -120,3 +120,39 @@ func TestHelpRendersSortedUsage(t *testing.T) {
 		t.Fatalf("help missing required-param rendering:\n%s", h)
 	}
 }
+
+func TestRunInvokesCommandByExactPathWithTypedInput(t *testing.T) {
+	var gotName string
+	r := build(t,
+		contracts.New("session", "create").Param("name", "", true).
+			Do(func(_ context.Context, in contracts.Input) (string, error) {
+				gotName = in.Get("name")
+				return "created", nil
+			}),
+	)
+	out, err := r.Run(context.Background(), []string{"session", "create"},
+		contracts.Input{Args: map[string]string{"name": "main"}})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out != "created" || gotName != "main" {
+		t.Fatalf("Run did not pass typed input: out=%q name=%q", out, gotName)
+	}
+}
+
+func TestRunRejectsUnknownPath(t *testing.T) {
+	r := build(t, leaf("session", "list"))
+	if _, err := r.Run(context.Background(), []string{"session", "nope"}, contracts.Input{}); err == nil {
+		t.Fatal("Run must reject an unknown path")
+	}
+}
+
+func TestRunChecksRequiredParams(t *testing.T) {
+	r := build(t,
+		contracts.New("session", "create").Param("name", "", true).
+			Do(func(context.Context, contracts.Input) (string, error) { return "", nil }),
+	)
+	if _, err := r.Run(context.Background(), []string{"session", "create"}, contracts.Input{Args: map[string]string{}}); err == nil {
+		t.Fatal("Run must reject missing required param")
+	}
+}

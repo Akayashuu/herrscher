@@ -43,6 +43,7 @@ func (labeledAdmin) ForumPost(context.Context, string, string, string) (string, 
 }
 func (labeledAdmin) Archive(context.Context, string) error      { return nil }
 func (labeledAdmin) Send(context.Context, string, string) error { return nil }
+func (labeledAdmin) ChannelRef(id string) string                { return id }
 
 func TestAdminForHomeMatchesGatewayKind(t *testing.T) {
 	discord := Deps{Gateway: kindGateway{"discord"}, Admin: labeledAdmin{"discord"}}

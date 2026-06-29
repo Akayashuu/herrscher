@@ -87,8 +87,14 @@ func TestRenderEventMarksAbandonedPerTab(t *testing.T) {
 }
 
 // fakeBackend satisfies the Backend interface for unit tests.
+type closedSession struct {
+	name  string
+	force bool
+}
+
 type fakeBackend struct {
 	dispatched [][]string
+	closed     []closedSession
 	sessions   []contracts.SessionInfo
 	fe         chan RoutedEvent
 }
@@ -98,6 +104,10 @@ func (f *fakeBackend) Submit(string, string)             {}
 func (f *fakeBackend) Sessions() []contracts.SessionInfo { return f.sessions }
 func (f *fakeBackend) Dispatch(args []string) (string, error) {
 	f.dispatched = append(f.dispatched, args)
+	return "ok", nil
+}
+func (f *fakeBackend) Close(name string, force bool) (string, error) {
+	f.closed = append(f.closed, closedSession{name: name, force: force})
 	return "ok", nil
 }
 
@@ -207,12 +217,14 @@ func TestCloseActiveDispatchesClose(t *testing.T) {
 	tb.label = "alpha"
 	m.active = "terminal/alpha-1"
 	runCmd(m.confirmClose()) // simulate confirmed close
-	if len(f.dispatched) != 1 {
-		t.Fatalf("close not dispatched: %+v", f.dispatched)
+	if len(f.closed) != 1 {
+		t.Fatalf("close not issued: %+v", f.closed)
 	}
-	// Assert positional args: session close --name alpha
-	if len(f.dispatched[0]) != 4 || f.dispatched[0][0] != "session" || f.dispatched[0][1] != "close" || f.dispatched[0][2] != "--name" || f.dispatched[0][3] != "alpha" {
-		t.Fatalf("close args mismatch: got %+v, want [session close --name alpha]", f.dispatched[0])
+	if f.closed[0].name != "alpha" || f.closed[0].force {
+		t.Fatalf("close mismatch: got %+v, want {alpha false}", f.closed[0])
+	}
+	if len(f.dispatched) != 0 {
+		t.Fatalf("close must use the typed seam, not argv dispatch: %+v", f.dispatched)
 	}
 }
 

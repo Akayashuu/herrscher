@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 
 	contracts "github.com/Herrscherd/herrscher-contracts"
@@ -105,6 +107,58 @@ func (h *hub) Dispatch(ctx context.Context, args []string) (string, error) {
 	h.dispatchMu.Lock()
 	defer h.dispatchMu.Unlock()
 	out, err := h.reg.Dispatch(ctx, args)
+	h.reconcile()
+	return out, err
+}
+
+// Create starts a session from a typed spec. It maps CreateSession into the
+// flags the session-create command declares and runs it through the typed
+// registry seam (no argv assembly), then reconciles so the new session is live.
+// It implements contracts.SessionControl.
+func (h *hub) Create(ctx context.Context, spec contracts.CreateSession) (string, error) {
+	args := map[string]string{"name": spec.Name}
+	setStr := func(k, v string) {
+		if v != "" {
+			args[k] = v
+		}
+	}
+	setStr("project", spec.Project)
+	setStr("clone", spec.Clone)
+	setStr("cmd", spec.Cmd)
+	setStr("backend", spec.Backend)
+	setStr("agent", spec.Agent)
+	setStr("extractor", spec.Extractor)
+	setStr("journal", spec.Journal)
+	if len(spec.Gateways) > 0 {
+		args["gateways"] = strings.Join(spec.Gateways, ",")
+	}
+	if spec.TerminalOnly {
+		args["terminal_only"] = "true"
+	}
+	if spec.Shared {
+		args["shared"] = "true"
+	}
+	if spec.ConsolidateEvery != 0 {
+		args["consolidate_every"] = strconv.Itoa(spec.ConsolidateEvery)
+	}
+	h.dispatchMu.Lock()
+	defer h.dispatchMu.Unlock()
+	out, err := h.reg.Run(ctx, []string{"session", "create"}, contracts.Input{Args: args})
+	h.reconcile()
+	return out, err
+}
+
+// Close tears a session down by name. It maps to the session-close flags and
+// runs through the typed registry seam, then reconciles. It implements
+// contracts.SessionControl.
+func (h *hub) Close(ctx context.Context, name string, force bool) (string, error) {
+	args := map[string]string{"name": name}
+	if force {
+		args["force"] = "true"
+	}
+	h.dispatchMu.Lock()
+	defer h.dispatchMu.Unlock()
+	out, err := h.reg.Run(ctx, []string{"session", "close"}, contracts.Input{Args: args})
 	h.reconcile()
 	return out, err
 }
